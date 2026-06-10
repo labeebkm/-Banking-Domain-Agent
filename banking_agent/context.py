@@ -1,4 +1,8 @@
-"""Context selection for banking questions."""
+"""Deprecated keyword-based context selection for banking questions.
+
+This module is retained for compatibility only. The assistant now uses a
+LangGraph ReAct agent with LLM-driven tool calling from banking_agent.tools.
+"""
 
 from banking_agent.knowledge import (
     get_banking_products,
