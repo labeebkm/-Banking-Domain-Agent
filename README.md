@@ -1,100 +1,131 @@
-# Banking Domain Agent — LangChain
+# Banking Domain Agent
 
-A domain-restricted conversational agent that **only** answers banking and finance questions.
-Built with LangChain's ReAct agent framework and Groq (LLaMA 3.3 70B) as the LLM backend.
+A command-line banking assistant that only answers banking and finance questions.
+It uses a fast keyword-based domain guard, local banking knowledge as deterministic
+context, and Groq's LLaMA model through LangChain for final response generation.
 
----
+## Project Overview
 
-## Architecture
+The assistant is designed to:
 
-```
-User Input
-    │
-    ▼
-┌─────────────────────┐
-│  Layer 1: Keyword   │  ← Fast pre-filter (no LLM cost for off-topic)
-│  Domain Guard       │
-└────────┬────────────┘
-         │ (banking-related only)
-         ▼
-┌─────────────────────┐
-│  ReAct Agent        │  ← LangChain AgentExecutor
-│  (LLaMA 3.3 70B     │     Thought → Action → Observation loop
-│   via Groq)         │
-└────────┬────────────┘
-         │
-    ┌────┴──────────────────────────────┐
-    │           TOOLS                   │
-    ├───────────────────────────────────┤
-    │ InterestRates     BankingProducts │
-    │ BankingRegulations BankingTech    │
-    └───────────────────────────────────┘
-         │
-         ▼
-    Final Answer
+- reject off-topic questions before calling the LLM
+- answer common banking questions about rates, products, regulations, and digital payments
+- provide local context to the model instead of relying only on model memory
+- avoid fragile LLM tool-calling behavior by selecting local context in Python
+
+## Project Structure
+
+```text
+.
+|-- agent.py                  # Thin CLI entry point for backward compatibility
+|-- banking_agent/
+|   |-- __init__.py
+|   |-- cli.py                # Interactive command-line loop
+|   |-- config.py             # Environment and model configuration
+|   |-- context.py            # Selects relevant local knowledge for each question
+|   |-- guard.py              # Banking-domain keyword guard
+|   |-- knowledge.py          # Local banking knowledge providers
+|   |-- prompts.py            # System prompt and standard responses
+|   `-- service.py            # Core build/run assistant functions
+|-- requirements.txt
+|-- .env.example
+`-- .gitignore
 ```
 
-## Domain Restriction — Two-Layer Approach
+## Dependencies
 
-| Layer | Method | Purpose |
-|-------|--------|---------|
-| 1 | Keyword filter (`is_banking_related()`) | Blocks off-topic queries before hitting the LLM — saves cost & latency |
-| 2 | System prompt instruction | LLM-level enforcement for edge cases that pass Layer 1 |
+- Python 3.11+
+- `langchain-groq`
+- `python-dotenv`
 
-## Tools
-
-| Tool | Covers |
-|------|--------|
-| `InterestRates` | Savings, FD, home/personal/car loan rates |
-| `BankingProducts` | Account types, credit cards, demat, NRI accounts |
-| `BankingRegulations` | RBI, Basel III, KYC, DICGC, NPA, IFRS 9 |
-| `BankingTechnology` | UPI, NEFT, RTGS, SWIFT, CBS, Open Banking |
+The installed environment may also include LangChain-related transitive packages.
 
 ## Setup
 
-```bash
-# 1. Clone / copy the files
-# 2. Install dependencies
+Create and activate a virtual environment:
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```powershell
 pip install -r requirements.txt
+```
 
-# 3. Set your API key
-cp .env.example .env
-# Edit .env and add your GROQ_API_KEY (free at console.groq.com)
+Create your local environment file:
 
-# 4. Run
+```powershell
+copy .env.example .env
+```
+
+Edit `.env` and add your Groq API key:
+
+```env
+GROQ_API_KEY=your_groq_api_key_here
+```
+
+Optional model settings:
+
+```env
+GROQ_MODEL=llama-3.3-70b-versatile
+MODEL_TEMPERATURE=0.2
+```
+
+## Usage
+
+Start the interactive assistant:
+
+```powershell
 python agent.py
 ```
 
-## Example Interaction
+Or run it with the virtual environment Python directly:
 
+```powershell
+.\venv\Scripts\python.exe agent.py
 ```
+
+Example:
+
+```text
 You: What is the current repo rate set by RBI?
 
-Agent: The RBI (Reserve Bank of India) uses the repo rate as its key
-monetary policy tool. As of 2025, the repo rate stands at 6.50%.
-It influences lending rates across all banks in India.
+Agent: The current repo rate set by the RBI is 5.25% as of the June 5, 2026,
+Monetary Policy Committee decision. Please verify the latest rate at rbi.org.in
+because policy rates can change.
+```
 
----
+Off-topic questions are rejected without calling the LLM:
 
+```text
 You: Tell me a recipe for biryani
 
-Agent: I'm a banking-specialized assistant and can only help with
-banking and finance topics. Please ask me something related to
-banking, loans, accounts, payments, or financial regulations.
+Agent: I'm a banking-specialized assistant and can only help with banking and
+finance topics. Please ask me something related to banking, loans, accounts,
+payments, or financial regulations.
 ```
 
-## Extending the Agent
+## How It Works
 
-To add new knowledge areas, create a new function and register it as a `Tool`:
+1. `guard.py` checks whether the user question is banking or finance related.
+2. `context.py` selects relevant local banking knowledge from `knowledge.py`.
+3. `service.py` sends the system prompt, selected context, and user question to Groq.
+4. `cli.py` prints the response in an interactive terminal loop.
 
-```python
-def get_trade_finance(query: str) -> str:
-    # Your logic here
-    return "Trade finance info..."
+## Extending The Agent
 
-Tool(
-    name="TradeFinance",
-    func=get_trade_finance,
-    description="Use for questions about LC, export credit, forfaiting, etc."
-)
-```
+To add a new knowledge area:
+
+1. Add a new dictionary and lookup function in `banking_agent/knowledge.py`.
+2. Add routing keywords for that area in `banking_agent/context.py`.
+3. Add domain keywords in `banking_agent/guard.py` if the topic should pass the guard.
+4. Update this README if the new feature changes setup or usage.
+
+## Notes
+
+- `.env` is intentionally ignored by git because it contains secrets.
+- Current rates and regulations can change. The assistant includes known local context,
+  but users should verify time-sensitive banking data with official sources.
