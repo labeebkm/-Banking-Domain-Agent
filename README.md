@@ -18,7 +18,7 @@ The assistant is built to:
 
 ```text
 .
-|-- agent.py                  # Thin CLI entry point for backward compatibility
+|-- agent.py                  # Thin CLI launcher
 |-- banking_agent/
 |   |-- __init__.py
 |   |-- cli.py                # Interactive command-line loop
@@ -114,6 +114,12 @@ Start the assistant:
 python agent.py
 ```
 
+If you want to force the project virtual environment Python:
+
+```powershell
+.\venv\Scripts\python.exe agent.py
+```
+
 You can also run the package module directly:
 
 ```powershell
@@ -172,5 +178,11 @@ To add a new banking knowledge area:
 ## Notes
 
 - `.env` is ignored by git and should not be committed.
-- `agent.py` remains as a simple compatibility entry point, so existing commands still work.
+- `agent.py` is intentionally small; the implementation lives inside the `banking_agent/` package.
 - Time-sensitive banking data can change. Verify current rates, rules, and regulations against official sources.
+
+## Troubleshooting
+
+- If imports fail, make sure dependencies are installed with `pip install -r requirements.txt`.
+- If Groq calls fail, confirm `GROQ_API_KEY` is set correctly in `.env`.
+- If PowerShell cannot activate the virtual environment, run commands with `.\venv\Scripts\python.exe` directly.
