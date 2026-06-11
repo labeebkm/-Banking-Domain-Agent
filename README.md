@@ -1,9 +1,9 @@
 # Banking Domain Agent
 
 A command-line banking assistant that only answers banking and finance questions.
-The project uses a domain guard, a LangGraph ReAct router agent, local banking
-knowledge tools, a Tavily-backed web-search tool, and Groq's LLaMA model for
-response generation.
+The project uses a domain guard, a LangGraph ReAct Banking Router Agent, a
+separate LangGraph ReAct Search Agent, local banking knowledge tools, a
+Tavily-backed web-search tool, and Groq's LLaMA model for response generation.
 
 ## Project Overview
 
@@ -11,7 +11,9 @@ The assistant is built to:
 
 - reject off-topic questions before calling the LLM
 - use local banking tools for rates, products, regulations, and payment technology
-- use Tavily web search for current rates, latest RBI updates, and recent banking news
+- delegate current rates, loan details, latest RBI updates, and recent banking news to a Search Agent
+- prefer official bank or regulator sources for time-sensitive search answers
+- include source URLs in live-search responses
 - keep banking knowledge in maintainable modules instead of one large script
 - recover from malformed Groq tool-call output when the requested tool and arguments can be parsed
 - remind users to verify time-sensitive rates and regulations with official sources
@@ -28,9 +30,9 @@ The assistant is built to:
 |   |-- guard.py              # Banking-domain keyword guard
 |   |-- knowledge.py          # Local banking knowledge dictionaries and lookup helpers
 |   |-- prompts.py            # System prompt and standard responses
-|   |-- router_agent.py       # Router agent with local tools and live search
-|   |-- search_agent.py       # Dedicated web-search agent
-|   |-- search_tool.py        # Tavily search tool
+|   |-- router_agent.py       # Router agent with local tools and search delegation
+|   |-- search_agent.py       # Dedicated web-search agent used through delegation
+|   |-- search_tool.py        # Tavily search tool with source formatting
 |   |-- service.py            # Agent construction, execution, and tool-call recovery
 |   `-- tools.py              # LangChain tools backed by local banking knowledge
 |-- requirements.txt
@@ -42,27 +44,50 @@ The assistant is built to:
 ## Architecture
 
 ```text
+python agent.py
+    |
+    v
+banking_agent/cli.py
+    |
+    v
+service.build_two_agent_system()
+    |
+    v
+router_agent.build_router_agent()
+    |
+    v
+Banking Router Agent (Groq model + local tools + delegate tool)
+    |
+    v
 User question
     |
     v
-Domain guard
+router_agent.run_router_agent()
+    |
+    v
+Domain guard in router_agent.py
     |
     |-- off-topic --> standard rejection response
     |
     v
-LangGraph ReAct router agent
+Router selects a tool
     |
     |-- general banking concepts --> local banking tools
-    |-- current/latest/recent data --> Tavily web_search tool
+    |       |-- get_interest_rates
+    |       |-- get_banking_products
+    |       |-- get_regulatory_info
+    |       `-- get_banking_technology
+    |
+    `-- current/latest/recent banking data --> delegate_to_search_agent
+            |
+            v
+       Search Agent (Groq model + web_search only)
+            |
+            v
+       search_tool.py --> langchain-tavily --> Tavily results with source URLs
     |
     v
-Tools
-    |
-    |-- get_interest_rates
-    |-- get_banking_products
-    |-- get_regulatory_info
-    |-- get_banking_technology
-    `-- web_search
+Tool result returned to router agent
     |
     v
 Final banking response
@@ -72,6 +97,10 @@ If Groq returns a malformed tool-call message but the tool name and JSON argumen
 can still be parsed, `service.py` recovers by invoking the matching local tool
 directly and returning a useful banking response.
 
+The Router Agent does not call `web_search` directly. It delegates live/current
+banking questions to `delegate_to_search_agent`, which runs the Search Agent.
+The Search Agent is the only agent with direct access to `web_search`.
+
 ## Dependencies
 
 The main dependencies are listed in `requirements.txt`:
@@ -80,6 +109,7 @@ The main dependencies are listed in `requirements.txt`:
 - `langchain-core`
 - `langchain-community`
 - `langchain-groq`
+- `langchain-tavily`
 - `langgraph`
 - `python-dotenv`
 - `tavily-python`
@@ -97,6 +127,12 @@ Install dependencies:
 
 ```powershell
 pip install -r requirements.txt
+```
+
+If you are using the project virtual environment explicitly:
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Create a local environment file:
@@ -149,6 +185,16 @@ is 5.25% as of the June 5, 2026 Monetary Policy Committee decision. Please
 verify current policy rates at rbi.org.in because MPC decisions can change.
 ```
 
+Example live-search question:
+
+```text
+You: Latest home loan rates from SBI?
+
+Agent: The latest home loan rates from SBI are based on current web-search
+results and should cite the official SBI home-loan rates page when available:
+https://sbi.bank.in/web/interest-rates/interest-rates/loan-schemes-interest-rates/home-loans-interest-rates-current
+```
+
 Example off-topic question:
 
 ```text
@@ -167,17 +213,20 @@ payments, or financial regulations.
 | `get_banking_products` | Accounts, cards, loans, demat accounts, NRI accounts, banking products |
 | `get_regulatory_info` | RBI, repo rate, Basel III, KYC, DICGC, FDIC, NPA, IFRS, regulations |
 | `get_banking_technology` | UPI, NEFT, RTGS, SWIFT, core banking, open banking, payment systems |
-| `web_search` | Live banking data, current loan rates, latest RBI announcements, recent financial news |
+| `delegate_to_search_agent` | Router tool that sends live/current banking questions to the Search Agent |
+| `web_search` | Search Agent tool for live banking data, current loan rates, latest RBI announcements, recent financial news, with citation-ready source URLs |
 
 ## How It Works
 
 1. `guard.py` checks whether the question is banking or finance related.
 2. `service.py` builds the two-agent system through `build_two_agent_system()`.
-3. `router_agent.py` decides whether to use local banking tools or `web_search`.
-4. `search_agent.py` provides a dedicated Tavily-only search agent for live data use cases.
-5. `knowledge.py` provides deterministic local answers for local tools.
-6. `service.py` keeps the older `build_agent()` and `run_agent()` functions for backward compatibility.
-7. `cli.py` manages the terminal chat loop and uses the two-agent system by default.
+3. `router_agent.py` decides whether to use local banking tools or `delegate_to_search_agent`.
+4. `delegate_to_search_agent` builds and runs the Search Agent for live/current banking questions.
+5. `search_agent.py` can only use `web_search` and summarizes the result with source URLs.
+6. `search_tool.py` calls `langchain-tavily`, formats search results with URLs, and injects a preferred official SBI source for SBI home-loan-rate questions.
+7. `knowledge.py` provides deterministic local answers for local tools.
+8. `service.py` keeps the older `build_agent()` and `run_agent()` functions for backward compatibility.
+9. `cli.py` manages the terminal chat loop and uses the two-agent system by default.
 
 ## Extending The Agent
 
@@ -211,10 +260,12 @@ The script checks:
 - `agent.py` is intentionally small; the implementation lives inside the `banking_agent/` package.
 - Time-sensitive banking data can change. Verify current rates, rules, and regulations against official sources.
 - Live search requires a valid `TAVILY_API_KEY`.
+- `web_search` uses the `langchain-tavily` package, not the deprecated `langchain_community.tools.tavily_search.TavilySearchResults` class.
 
 ## Troubleshooting
 
-- If imports fail, make sure dependencies are installed with `pip install -r requirements.txt`.
+- If imports fail, make sure dependencies are installed in the same Python environment you use to run the app.
+- If `ModuleNotFoundError: No module named 'langchain_tavily'` appears while the virtual environment is active, run `.\venv\Scripts\python.exe -m pip install -r requirements.txt`.
 - If Groq calls fail, confirm `GROQ_API_KEY` is set correctly in `.env`.
 - If live search fails, confirm `TAVILY_API_KEY` is set correctly in `.env`.
 - If PowerShell cannot activate the virtual environment, run commands with `.\venv\Scripts\python.exe` directly.

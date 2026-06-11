@@ -8,6 +8,12 @@ from langchain_core.tools import tool
 from banking_agent.config import TAVILY_API_KEY
 
 
+def _clean_text(value: Any) -> str:
+    """Keep live-search text safe for Windows console output."""
+    text = str(value)
+    return text.encode("ascii", errors="ignore").decode("ascii")
+
+
 def _build_search_query(query: str) -> str:
     """Add official-source hints for time-sensitive banking searches."""
     query_lower = query.lower()
@@ -32,9 +38,9 @@ def _format_search_results(result: Any) -> str:
         if not isinstance(item, dict):
             continue
 
-        title = item.get("title") or "Untitled result"
-        url = item.get("url") or "No URL"
-        content = item.get("content") or "No snippet available."
+        title = _clean_text(item.get("title") or "Untitled result")
+        url = _clean_text(item.get("url") or "No URL")
+        content = _clean_text(item.get("content") or "No snippet available.")
         formatted_results.append(
             f"{index}. {title}\nURL: {url}\nSnippet: {content}"
         )
@@ -63,7 +69,16 @@ def web_search(query: str):
     """Search the internet for live banking data, current loan rates, latest RBI announcements, recent financial news, or banking information not available in local knowledge. Prefer official sources and include dates when results are time-sensitive."""
     search = TavilySearch(max_results=5, tavily_api_key=TAVILY_API_KEY)
     preferred_sources = _preferred_official_sources(query)
-    search_results = _format_search_results(search.invoke({"query": _build_search_query(query)}))
+    try:
+        search_results = _format_search_results(
+            search.invoke({"query": _build_search_query(query)})
+        )
+    except Exception as exc:
+        return (
+            "Live search is unavailable right now. Please verify current banking "
+            "details with the latest official bank or regulator source. "
+            f"Details: {exc}"
+        )
     if preferred_sources:
         return f"{preferred_sources}\n\n{search_results}"
     return search_results

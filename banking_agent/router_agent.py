@@ -1,41 +1,30 @@
-"""Router agent that chooses between local banking tools and live web search."""
+"""Router agent that answers locally or delegates live-data questions."""
 
 import json
 import re
 from typing import Any
 
 from langchain_groq import ChatGroq
+from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
 from banking_agent.config import GROQ_API_KEY, MODEL_NAME, MODEL_TEMPERATURE
 from banking_agent.guard import is_banking_related
-from banking_agent.prompts import OFF_TOPIC_RESPONSE
-from banking_agent.search_tool import WEB_SEARCH_TOOL
+from banking_agent.prompts import OFF_TOPIC_RESPONSE, ROUTER_SYSTEM_PROMPT
+from banking_agent.search_agent import build_search_agent, run_search_agent
 from banking_agent.tools import BANKING_TOOLS
 
 
-ROUTER_TOOLS = [*BANKING_TOOLS, WEB_SEARCH_TOOL]
-TOOL_CALL_PATTERN = re.compile(r"<function=(?P<name>\w+)(?P<args>\{.*?\})</function>")
+@tool
+def delegate_to_search_agent(query: str) -> str:
+    """Delegate current/live banking, loan, RBI, rate, or bank-specific product questions to the Search Agent."""
+    search_agent = build_search_agent()
+    return run_search_agent(search_agent, query)
+
+
+ROUTER_TOOLS = [*BANKING_TOOLS, delegate_to_search_agent]
+TOOL_CALL_PATTERN = re.compile(r"<function=(?P<name>\w+)\s*(?P<args>\{.*?\})</function>")
 TOOL_BY_NAME = {tool.name: tool for tool in ROUTER_TOOLS}
-
-ROUTER_SYSTEM_PROMPT = """
-You are a banking and finance router assistant with access to local banking tools
-and a live web_search tool.
-
-Routing rules:
-- Only answer banking and finance questions.
-- Use local tools for general banking concepts, definitions, regulations, and product information:
-  get_interest_rates, get_banking_products, get_regulatory_info, get_banking_technology.
-- Use web_search for current or latest loan rates from specific banks.
-- Use web_search for recent RBI announcements or policy changes.
-- Use web_search for live market data or current interest rates.
-- Use web_search for any question containing words like "latest", "current",
-  "today", "now", "recent", "2025", or "2026".
-- Never answer from memory. Always call a tool first.
-- Cite tool results in the response.
-- When using web_search, include the source URL(s) from the tool result in the final answer.
-- If a tool result is insufficient, say so honestly and explain what should be verified.
-"""
 
 
 def _is_obvious_non_banking_question(user_input: str) -> bool:
@@ -59,7 +48,7 @@ def _is_obvious_non_banking_question(user_input: str) -> bool:
 
 
 def build_router_agent() -> Any:
-    """Build and return the router agent with local and web-search tools."""
+    """Build the Router Agent with local tools and Search Agent delegation."""
     llm = ChatGroq(
         model=MODEL_NAME,
         temperature=MODEL_TEMPERATURE,
