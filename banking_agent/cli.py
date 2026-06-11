@@ -1,16 +1,16 @@
 """Command-line interface for the banking assistant."""
 
-from banking_agent.service import build_agent, run_agent
+from banking_agent.service import build_two_agent_system, run_two_agent_system
 
 
 def main() -> None:
     """Start the interactive CLI chat loop."""
     print("=" * 60)
-    print("  Banking Domain Agent  (powered by LangChain + Groq)")
+    print("Banking Domain Agent  (powered by LangGraph + Groq + Tavily)")
     print("  Type 'exit' or 'quit' to stop.")
     print("=" * 60)
 
-    agent = build_agent()
+    agent = build_two_agent_system()
 
     while True:
         user_input = input("\nYou: ").strip()
@@ -22,7 +22,7 @@ def main() -> None:
             break
 
         print("\nAgent thinking...\n")
-        response = run_agent(agent, user_input)
+        response = run_two_agent_system(agent, user_input)
         print(f"\nAgent: {response}\n")
         print("-" * 60)
 

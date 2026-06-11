@@ -10,6 +10,7 @@ from langgraph.prebuilt import create_react_agent
 from banking_agent.config import GROQ_API_KEY, MODEL_NAME, MODEL_TEMPERATURE
 from banking_agent.guard import is_banking_related
 from banking_agent.prompts import OFF_TOPIC_RESPONSE, SYSTEM_PROMPT
+from banking_agent.router_agent import build_router_agent, run_router_agent
 from banking_agent.tools import BANKING_TOOLS
 
 
@@ -74,3 +75,13 @@ def run_agent(agent: Any, user_input: str) -> str:
 
     final_message = messages[-1]
     return getattr(final_message, "content", str(final_message))
+
+
+def build_two_agent_system() -> Any:
+    """Build and return the router agent for the two-agent system."""
+    return build_router_agent()
+
+
+def run_two_agent_system(agent: Any, user_input: str) -> str:
+    """Run the two-agent system through the router agent."""
+    return run_router_agent(agent, user_input)

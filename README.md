@@ -1,15 +1,17 @@
 # Banking Domain Agent
 
 A command-line banking assistant that only answers banking and finance questions.
-The project uses a domain guard, LangGraph ReAct agent flow, LangChain tools backed
-by local banking knowledge, and Groq's LLaMA model for response generation.
+The project uses a domain guard, a LangGraph ReAct router agent, local banking
+knowledge tools, a Tavily-backed web-search tool, and Groq's LLaMA model for
+response generation.
 
 ## Project Overview
 
 The assistant is built to:
 
 - reject off-topic questions before calling the LLM
-- use banking-specific tools for rates, products, regulations, and payment technology
+- use local banking tools for rates, products, regulations, and payment technology
+- use Tavily web search for current rates, latest RBI updates, and recent banking news
 - keep banking knowledge in maintainable modules instead of one large script
 - recover from malformed Groq tool-call output when the requested tool and arguments can be parsed
 - remind users to verify time-sensitive rates and regulations with official sources
@@ -26,9 +28,13 @@ The assistant is built to:
 |   |-- guard.py              # Banking-domain keyword guard
 |   |-- knowledge.py          # Local banking knowledge dictionaries and lookup helpers
 |   |-- prompts.py            # System prompt and standard responses
+|   |-- router_agent.py       # Router agent with local tools and live search
+|   |-- search_agent.py       # Dedicated web-search agent
+|   |-- search_tool.py        # Tavily search tool
 |   |-- service.py            # Agent construction, execution, and tool-call recovery
 |   `-- tools.py              # LangChain tools backed by local banking knowledge
 |-- requirements.txt
+|-- test_two_agent.py
 |-- .env.example
 `-- .gitignore
 ```
@@ -44,15 +50,19 @@ Domain guard
     |-- off-topic --> standard rejection response
     |
     v
-LangGraph ReAct agent
+LangGraph ReAct router agent
+    |
+    |-- general banking concepts --> local banking tools
+    |-- current/latest/recent data --> Tavily web_search tool
     |
     v
-Banking tools
+Tools
     |
     |-- get_interest_rates
     |-- get_banking_products
     |-- get_regulatory_info
-    `-- get_banking_technology
+    |-- get_banking_technology
+    `-- web_search
     |
     v
 Final banking response
@@ -68,9 +78,11 @@ The main dependencies are listed in `requirements.txt`:
 
 - Python 3.11+
 - `langchain-core`
+- `langchain-community`
 - `langchain-groq`
 - `langgraph`
 - `python-dotenv`
+- `tavily-python`
 
 ## Setup
 
@@ -93,10 +105,11 @@ Create a local environment file:
 copy .env.example .env
 ```
 
-Edit `.env` and add your Groq API key:
+Edit `.env` and add your API keys:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
+TAVILY_API_KEY=your_tavily_api_key_here
 ```
 
 Optional model settings:
@@ -154,15 +167,17 @@ payments, or financial regulations.
 | `get_banking_products` | Accounts, cards, loans, demat accounts, NRI accounts, banking products |
 | `get_regulatory_info` | RBI, repo rate, Basel III, KYC, DICGC, FDIC, NPA, IFRS, regulations |
 | `get_banking_technology` | UPI, NEFT, RTGS, SWIFT, core banking, open banking, payment systems |
+| `web_search` | Live banking data, current loan rates, latest RBI announcements, recent financial news |
 
 ## How It Works
 
 1. `guard.py` checks whether the question is banking or finance related.
-2. `service.py` builds a LangGraph ReAct agent using Groq and the tools from `tools.py`.
-3. `prompts.py` instructs the agent to call the relevant tool before answering.
-4. `knowledge.py` provides deterministic local answers for each tool.
-5. `service.py` returns the final response or recovers from parseable malformed tool-call errors.
-6. `cli.py` manages the terminal chat loop.
+2. `service.py` builds the two-agent system through `build_two_agent_system()`.
+3. `router_agent.py` decides whether to use local banking tools or `web_search`.
+4. `search_agent.py` provides a dedicated Tavily-only search agent for live data use cases.
+5. `knowledge.py` provides deterministic local answers for local tools.
+6. `service.py` keeps the older `build_agent()` and `run_agent()` functions for backward compatibility.
+7. `cli.py` manages the terminal chat loop and uses the two-agent system by default.
 
 ## Extending The Agent
 
@@ -175,14 +190,31 @@ To add a new banking knowledge area:
 5. Update `SYSTEM_PROMPT` in `banking_agent/prompts.py` so the agent knows when to use the new tool.
 6. Update this README with the new tool and usage notes.
 
+## Manual Test Script
+
+Run the two-agent smoke test:
+
+```powershell
+python test_two_agent.py
+```
+
+The script checks:
+
+- local knowledge question: `What is KYC?`
+- live search question: `What are the latest home loan rates from SBI?`
+- recent news question: `What are the latest RBI announcements?`
+- off-topic question: `What is the capital of France?`
+
 ## Notes
 
 - `.env` is ignored by git and should not be committed.
 - `agent.py` is intentionally small; the implementation lives inside the `banking_agent/` package.
 - Time-sensitive banking data can change. Verify current rates, rules, and regulations against official sources.
+- Live search requires a valid `TAVILY_API_KEY`.
 
 ## Troubleshooting
 
 - If imports fail, make sure dependencies are installed with `pip install -r requirements.txt`.
 - If Groq calls fail, confirm `GROQ_API_KEY` is set correctly in `.env`.
+- If live search fails, confirm `TAVILY_API_KEY` is set correctly in `.env`.
 - If PowerShell cannot activate the virtual environment, run commands with `.\venv\Scripts\python.exe` directly.
