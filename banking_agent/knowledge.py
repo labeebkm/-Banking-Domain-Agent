@@ -119,37 +119,3 @@ def _lookup(query: str, data: dict[str, str], fallback: str) -> str:
     return fallback
 
 
-def get_interest_rates(query: str) -> str:
-    """Return common banking interest-rate information."""
-    return _lookup(
-        query,
-        INTEREST_RATES,
-        "Common interest-rate topics include savings rates, fixed deposits, home loans, personal loans, and car loans.",
-    )
-
-
-def get_banking_products(query: str) -> str:
-    """Return information about banking products and services."""
-    return _lookup(
-        query,
-        BANKING_PRODUCTS,
-        "Major banking products include savings accounts, current accounts, FD/RD, cards, loans, demat accounts, and NRI accounts.",
-    )
-
-
-def get_regulatory_info(query: str) -> str:
-    """Return banking regulatory and compliance information."""
-    return _lookup(
-        query,
-        REGULATIONS,
-        "Key banking regulations include RBI guidelines, Basel III, KYC/AML, DICGC insurance, and NPA classification norms.",
-    )
-
-
-def get_banking_technology(query: str) -> str:
-    """Return information about banking technology and digital payments."""
-    return _lookup(
-        query,
-        TECHNOLOGY,
-        "Banking technology topics include UPI, NEFT, RTGS, IMPS, SWIFT, CBS, open banking, digital KYC, and CBDC.",
-    )
