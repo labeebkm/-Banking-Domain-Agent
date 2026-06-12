@@ -8,7 +8,7 @@ from langchain_groq import ChatGroq
 from langgraph.prebuilt import create_react_agent
 
 from banking_agent.config import DEBUG_AGENTS, GROQ_API_KEY, MODEL_NAME, MODEL_TEMPERATURE
-from banking_agent.prompts import SEARCH_SYSTEM_PROMPT
+from banking_agent.prompts import QUERY_REWRITE_PROMPT, SEARCH_SYSTEM_PROMPT
 from banking_agent.search_tool import WEB_SEARCH_TOOL
 
 
@@ -16,6 +16,7 @@ TOOL_CALL_PATTERN = re.compile(r"<function=(?P<name>\w+)\s*(?P<args>\{.*?\})</fu
 RECURSION_LIMIT = 5
 SUMMARY_INPUT_LIMIT = 1800
 SOURCE_URL_PATTERN = re.compile(r"URL:\s*(?P<url>\S+)")
+QUERY_REWRITE_LIMIT = 160
 
 
 def _debug(message: str) -> None:
@@ -26,6 +27,37 @@ def _debug(message: str) -> None:
 def _is_rate_limit_error(error: Exception) -> bool:
     error_text = str(error).lower()
     return "429" in error_text or "rate_limit" in error_text or "rate limit" in error_text
+
+
+def _clean_output(text: str) -> str:
+    """Keep generated answers safe for the Windows console."""
+    return text.encode("ascii", errors="ignore").decode("ascii")
+
+
+def build_search_query(user_query: str) -> str:
+    """Use the configured model to rewrite a banking question for web search."""
+    try:
+        llm = ChatGroq(
+            model=MODEL_NAME,
+            temperature=0,
+            api_key=GROQ_API_KEY,
+        )
+        response = llm.invoke(
+            [
+                ("system", QUERY_REWRITE_PROMPT),
+                ("human", f"User: {user_query}\nSearch query:"),
+            ]
+        )
+    except Exception:
+        return f"{user_query} official latest banking"
+
+    rewritten_query = getattr(response, "content", str(response)).strip()
+    rewritten_query = rewritten_query.replace('"', "").replace("'", "")
+    rewritten_query = rewritten_query.splitlines()[0].strip()
+    rewritten_query = re.sub(r"^(search query|query)\s*:\s*", "", rewritten_query, flags=re.IGNORECASE)
+    if not rewritten_query:
+        return f"{user_query} official latest banking"
+    return rewritten_query[:QUERY_REWRITE_LIMIT]
 
 
 def _extract_source_urls(search_results: str) -> list[str]:
@@ -46,6 +78,15 @@ def _format_source_list(urls: list[str]) -> str:
     if not urls:
         return "Sources:\nNo source URLs were available from the search results."
     return "Sources:\n" + "\n".join(f"{index}. {url}" for index, url in enumerate(urls, start=1))
+
+
+def _finalize_summary(summary: str, search_results: str) -> str:
+    """Use the LLM answer but force sources to come from search results."""
+    urls = _extract_source_urls(search_results)
+    answer = re.split(r"\n\s*Sources\s*:", summary, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    if not answer.lower().startswith("answer:"):
+        answer = f"Answer:\n{answer}"
+    return _clean_output(f"{answer}\n\n{_format_source_list(urls)}")
 
 
 def _fallback_summary(search_results: str) -> str:
@@ -108,6 +149,7 @@ Sources:
 
 Use at most 3 source URLs and do not include duplicate URLs.
 For repo-rate questions, do not treat reverse repo rate, MSF rate, or Bank Rate as the RBI policy repo rate.
+Do not mention your knowledge cutoff. Do not use sources outside the compact search results.
 """
     response = llm.invoke(
         [
@@ -156,7 +198,9 @@ def run_search_agent(agent: Any, query: str) -> str:
     _debug("Search Agent called")
     try:
         # Single search call avoids repeated ReAct loops and keeps live queries cheap.
-        tool_result = WEB_SEARCH_TOOL.invoke({"query": query})
+        search_query = build_search_query(query)
+        _debug(f"Rewritten search query: {search_query}")
+        tool_result = WEB_SEARCH_TOOL.invoke({"query": search_query})
     except Exception as exc:
         recovered_response = _recover_failed_search_tool_call(exc)
         if recovered_response is not None:
@@ -187,7 +231,8 @@ def run_search_agent(agent: Any, query: str) -> str:
         return _repo_rate_uncertain_summary(tool_result)
 
     try:
-        return _summarize_search_results(query, tool_result)
+        summary = _summarize_search_results(query, tool_result)
+        return _finalize_summary(summary, tool_result)
     except Exception as exc:
         if _is_rate_limit_error(exc):
             return (

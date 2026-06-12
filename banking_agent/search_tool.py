@@ -22,6 +22,7 @@ LOW_QUALITY_DOMAINS = (
     "quora.com",
     "reddit.com",
     "yahoo.com",
+    "youtube.com",
 )
 
 
@@ -58,13 +59,8 @@ def _is_low_quality_url(url: str) -> bool:
 
 
 def _build_search_query(query: str) -> str:
-    """Add official-source hints for time-sensitive banking searches."""
-    query_lower = query.lower()
-    if "sbi" in query_lower or "state bank of india" in query_lower:
-        return f"{query} SBI official latest home loan interest rates India"
-    if "rbi" in query_lower or "repo rate" in query_lower:
-        return f"{query} RBI monetary policy repo rate current official site:rbi.org.in"
-    return f"{query} official source"
+    """Pass through the Search Agent's rewritten query."""
+    return query
 
 
 def _format_search_results(result: Any, preferred_sources: list[dict[str, str]] | None = None) -> str:
@@ -111,24 +107,6 @@ def _format_search_results(result: Any, preferred_sources: list[dict[str, str]] 
     return "\n\n".join(formatted_results)
 
 
-def _preferred_official_sources(query: str) -> list[dict[str, str]]:
-    """Provide known official pages for common bank-rate queries."""
-    query_lower = query.lower()
-    if (
-        ("sbi" in query_lower or "state bank of india" in query_lower)
-        and "home" in query_lower
-        and "loan" in query_lower
-    ):
-        return [
-            {
-                "title": "SBI Home Loans Interest Rates (Current)",
-                "url": "https://sbi.bank.in/web/interest-rates/interest-rates/loan-schemes-interest-rates/home-loans-interest-rates-current",
-                "content": "Official SBI page for current home-loan interest rates. SBI home-loan rates appear to start from 7.25% p.a. where applicable.",
-            }
-        ]
-    return []
-
-
 @tool
 def web_search(query: str):
     """Search the internet for live banking data, current loan rates, latest RBI announcements, recent financial news, or banking information not available in local knowledge. Prefer official sources and include dates when results are time-sensitive."""
@@ -136,11 +114,9 @@ def web_search(query: str):
         print("web_search called")
 
     search = TavilySearch(max_results=MAX_SEARCH_RESULTS, tavily_api_key=TAVILY_API_KEY)
-    preferred_sources = _preferred_official_sources(query)
     try:
         search_results = _format_search_results(
             search.invoke({"query": _build_search_query(query)}),
-            preferred_sources=preferred_sources,
         )
     except Exception as exc:
         return (

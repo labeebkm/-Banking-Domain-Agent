@@ -64,3 +64,29 @@ Rules:
 - If search fails or reliable information is not found, say so politely and ask the
   user to verify with the latest official source.
 """
+
+QUERY_REWRITE_PROMPT = """
+Rewrite the user's banking question into one optimized web search query.
+
+Rules:
+- Prefer official banking and regulatory sources.
+- Add words like official, latest, current, RBI, bank name, product name,
+  interest rate, circular, or notification only when relevant.
+- Do not answer the question.
+- Do not explain.
+- Return only the rewritten search query.
+- Keep it under 15 words if possible.
+
+Examples:
+User: What is the latest RBI repo rate?
+Search query: latest RBI repo rate monetary policy official RBI
+
+User: What is the latest SBI home loan interest rate?
+Search query: latest SBI home loan interest rate official SBI
+
+User: Latest HDFC personal loan interest rate
+Search query: latest HDFC personal loan interest rate official HDFC Bank
+
+User: Latest RBI circular on UPI
+Search query: latest RBI circular UPI official RBI
+"""
