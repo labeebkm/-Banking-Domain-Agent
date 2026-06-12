@@ -178,7 +178,7 @@ def build_search_agent() -> Any:
     )
 
 
-def _recover_failed_search_tool_call(error: Exception) -> str | None:
+def _recover_failed_search_tool_call(error: Exception, query: str) -> str | None:
     """Recover when the Search Agent emits a malformed web_search tool call."""
     match = TOOL_CALL_PATTERN.search(str(error))
     if not match or match.group("name") != WEB_SEARCH_TOOL.name:
@@ -190,7 +190,11 @@ def _recover_failed_search_tool_call(error: Exception) -> str | None:
     except Exception:
         return None
 
-    return _fallback_summary(tool_result)
+    try:
+        summary = _summarize_search_results(query, tool_result)
+        return _finalize_summary(summary, tool_result)
+    except Exception:
+        return _fallback_summary(tool_result)
 
 
 def run_search_agent(agent: Any, query: str) -> str:
