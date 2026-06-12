@@ -1,17 +1,60 @@
 """Tavily web-search tool for live banking information."""
 
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_tavily import TavilySearch
 from langchain_core.tools import tool
 
-from banking_agent.config import TAVILY_API_KEY
+from banking_agent.config import DEBUG_AGENTS, TAVILY_API_KEY
+
+
+MAX_SEARCH_RESULTS = 3
+SNIPPET_LIMIT = 220
+OFFICIAL_DOMAINS = (
+    "rbi.org.in",
+    "sbi.bank.in",
+    ".bank.in",
+    ".gov.in",
+    ".nic.in",
+)
+LOW_QUALITY_DOMAINS = (
+    "quora.com",
+    "reddit.com",
+    "yahoo.com",
+)
 
 
 def _clean_text(value: Any) -> str:
     """Keep live-search text safe for Windows console output."""
     text = str(value)
-    return text.encode("ascii", errors="ignore").decode("ascii")
+    clean = " ".join(text.encode("ascii", errors="ignore").decode("ascii").split())
+    return clean[:SNIPPET_LIMIT]
+
+
+def _clean_url(value: Any) -> str:
+    """Normalize URLs enough to remove duplicates from search results."""
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    path = parsed.path.rstrip("/").lower()
+    hostname = parsed.netloc.lower()
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    return f"{parsed.scheme}://{hostname}{path}"
+
+
+def _is_official_url(url: str) -> bool:
+    """Identify official bank, RBI, regulator, and government URLs."""
+    hostname = urlparse(url).netloc.lower()
+    return any(hostname == domain or hostname.endswith(domain) for domain in OFFICIAL_DOMAINS)
+
+
+def _is_low_quality_url(url: str) -> bool:
+    """Filter sources that are poor evidence for current banking rates."""
+    hostname = urlparse(url).netloc.lower()
+    return any(hostname == domain or hostname.endswith(f".{domain}") for domain in LOW_QUALITY_DOMAINS)
 
 
 def _build_search_query(query: str) -> str:
@@ -19,36 +62,56 @@ def _build_search_query(query: str) -> str:
     query_lower = query.lower()
     if "sbi" in query_lower or "state bank of india" in query_lower:
         return f"{query} SBI official latest home loan interest rates India"
+    if "rbi" in query_lower or "repo rate" in query_lower:
+        return f"{query} RBI monetary policy repo rate current official site:rbi.org.in"
     return f"{query} official source"
 
 
-def _format_search_results(result: Any) -> str:
-    """Return search results in a citation-friendly format for the agent."""
+def _format_search_results(result: Any, preferred_sources: list[dict[str, str]] | None = None) -> str:
+    """Return up to three compact, deduplicated search results."""
     if not isinstance(result, dict):
         return str(result)
 
-    results = result.get("results") or []
+    results = [*(preferred_sources or []), *(result.get("results") or [])]
     if not results:
         return "No useful web search results were found."
 
-    formatted_results = [
-        "Use these web search results as sources. Prefer official bank or regulator pages over third-party aggregators, and cite URLs in the final answer."
-    ]
-    for index, item in enumerate(results, start=1):
+    unique_results: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in results:
         if not isinstance(item, dict):
             continue
 
-        title = _clean_text(item.get("title") or "Untitled result")
-        url = _clean_text(item.get("url") or "No URL")
-        content = _clean_text(item.get("content") or "No snippet available.")
+        url = _clean_url(item.get("url"))
+        if not url or url in seen_urls:
+            continue
+        if _is_low_quality_url(url):
+            continue
+
+        seen_urls.add(url)
+        unique_results.append(
+            {
+                "title": _clean_text(item.get("title") or "Untitled result"),
+                "url": url,
+                "content": _clean_text(item.get("content") or "No snippet available."),
+            }
+        )
+
+    unique_results.sort(key=lambda item: 0 if _is_official_url(item["url"]) else 1)
+    unique_results = unique_results[:MAX_SEARCH_RESULTS]
+
+    formatted_results = [
+        "Use these compact web search results as sources. Prefer official URLs and cite at most 3 URLs."
+    ]
+    for index, item in enumerate(unique_results, start=1):
         formatted_results.append(
-            f"{index}. {title}\nURL: {url}\nSnippet: {content}"
+            f"{index}. {item['title']}\nURL: {item['url']}\nSnippet: {item['content']}"
         )
 
     return "\n\n".join(formatted_results)
 
 
-def _preferred_official_sources(query: str) -> str:
+def _preferred_official_sources(query: str) -> list[dict[str, str]]:
     """Provide known official pages for common bank-rate queries."""
     query_lower = query.lower()
     if (
@@ -56,22 +119,28 @@ def _preferred_official_sources(query: str) -> str:
         and "home" in query_lower
         and "loan" in query_lower
     ):
-        return (
-            "Preferred official source for SBI home-loan rates:\n"
-            "SBI Home Loans Interest Rates (Current)\n"
-            "URL: https://sbi.bank.in/web/interest-rates/interest-rates/loan-schemes-interest-rates/home-loans-interest-rates-current"
-        )
-    return ""
+        return [
+            {
+                "title": "SBI Home Loans Interest Rates (Current)",
+                "url": "https://sbi.bank.in/web/interest-rates/interest-rates/loan-schemes-interest-rates/home-loans-interest-rates-current",
+                "content": "Official SBI page for current home-loan interest rates. SBI home-loan rates appear to start from 7.25% p.a. where applicable.",
+            }
+        ]
+    return []
 
 
 @tool
 def web_search(query: str):
     """Search the internet for live banking data, current loan rates, latest RBI announcements, recent financial news, or banking information not available in local knowledge. Prefer official sources and include dates when results are time-sensitive."""
-    search = TavilySearch(max_results=5, tavily_api_key=TAVILY_API_KEY)
+    if DEBUG_AGENTS:
+        print("web_search called")
+
+    search = TavilySearch(max_results=MAX_SEARCH_RESULTS, tavily_api_key=TAVILY_API_KEY)
     preferred_sources = _preferred_official_sources(query)
     try:
         search_results = _format_search_results(
-            search.invoke({"query": _build_search_query(query)})
+            search.invoke({"query": _build_search_query(query)}),
+            preferred_sources=preferred_sources,
         )
     except Exception as exc:
         return (
@@ -79,8 +148,6 @@ def web_search(query: str):
             "details with the latest official bank or regulator source. "
             f"Details: {exc}"
         )
-    if preferred_sources:
-        return f"{preferred_sources}\n\n{search_results}"
     return search_results
 
 

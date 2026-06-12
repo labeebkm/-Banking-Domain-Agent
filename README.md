@@ -151,9 +151,13 @@ TAVILY_API_KEY=your_tavily_api_key_here
 Optional model settings:
 
 ```env
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=llama-3.1-8b-instant
 MODEL_TEMPERATURE=0.2
+DEBUG_AGENTS=1
 ```
+
+Set `DEBUG_AGENTS=0` to hide agent debug messages such as `Router Agent called`,
+`Delegating to Search Agent`, `Search Agent called`, and `web_search called`.
 
 ## Usage
 
