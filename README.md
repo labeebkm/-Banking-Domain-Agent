@@ -3,7 +3,7 @@
 A command-line banking assistant that only answers banking and finance questions.
 The project uses a domain guard, a LangGraph ReAct Banking Router Agent, a
 separate LangGraph ReAct Search Agent, local banking knowledge tools, a
-Tavily-backed web-search tool, and Groq's LLaMA model for response generation.
+custom banking web crawler, and Groq's LLaMA model for response generation.
 
 ## Project Overview
 
@@ -32,7 +32,7 @@ The assistant is built to:
 |   |-- prompts.py            # System prompt and standard responses
 |   |-- router_agent.py       # Router agent with local tools and search delegation
 |   |-- search_agent.py       # Dedicated web-search agent used through delegation
-|   |-- search_tool.py        # Tavily search tool with source formatting
+|   |-- search_tool.py        # Custom crawler tool with source formatting
 |   |-- service.py            # Agent construction, execution, and tool-call recovery
 |   `-- tools.py              # LangChain tools backed by local banking knowledge
 |-- requirements.txt
@@ -84,7 +84,7 @@ Router selects a tool
        Search Agent (Groq model + web_search only)
             |
             v
-       search_tool.py --> langchain-tavily --> Tavily results with source URLs
+       search_tool.py --> official source map + DuckDuckGo HTML resolver + local crawler
     |
     v
 Tool result returned to router agent
@@ -101,6 +101,17 @@ The Router Agent does not call `web_search` directly. It delegates live/current
 banking questions to `delegate_to_search_agent`, which runs the Search Agent.
 The Search Agent is the only agent with direct access to `web_search`.
 
+## Custom Banking Web Crawler
+
+The project does not use Tavily, Google Custom Search JSON API, SerpAPI, or any
+external search API key. The Search Agent keeps the same `web_search` tool name,
+but the tool is backed by local crawling:
+
+1. Known official banking and regulator URLs are selected first from an official source map, including RBI, SBI, HDFC Bank, ICICI Bank, and Axis Bank pages.
+2. If more candidates are needed, the tool resolves links from DuckDuckGo's no-key HTML search page.
+3. Candidate pages are fetched with `requests`, parsed with `beautifulsoup4`, stripped of script/navigation/footer boilerplate, and converted into compact snippets.
+4. Results are filtered, deduplicated, official sources are preferred, and at most three citation-ready URLs are returned.
+
 ## Dependencies
 
 The main dependencies are listed in `requirements.txt`:
@@ -109,10 +120,10 @@ The main dependencies are listed in `requirements.txt`:
 - `langchain-core`
 - `langchain-community`
 - `langchain-groq`
-- `langchain-tavily`
 - `langgraph`
 - `python-dotenv`
-- `tavily-python`
+- `requests`
+- `beautifulsoup4`
 
 ## Setup
 
@@ -145,7 +156,6 @@ Edit `.env` and add your API keys:
 
 ```env
 GROQ_API_KEY=your_groq_api_key_here
-TAVILY_API_KEY=your_tavily_api_key_here
 ```
 
 Optional model settings:
@@ -194,7 +204,7 @@ Example live-search question:
 ```text
 You: Latest home loan rates from SBI?
 
-Agent: The latest home loan rates from SBI are based on current web-search
+Agent: The latest home loan rates from SBI are based on current crawler
 results and should cite the official SBI home-loan rates page when available:
 https://sbi.bank.in/web/interest-rates/interest-rates/loan-schemes-interest-rates/home-loans-interest-rates-current
 ```
@@ -218,7 +228,7 @@ payments, or financial regulations.
 | `get_regulatory_info` | RBI, repo rate, Basel III, KYC, DICGC, FDIC, NPA, IFRS, regulations |
 | `get_banking_technology` | UPI, NEFT, RTGS, SWIFT, core banking, open banking, payment systems |
 | `delegate_to_search_agent` | Router tool that sends live/current banking questions to the Search Agent |
-| `web_search` | Search Agent tool for live banking data, current loan rates, latest RBI announcements, recent financial news, with citation-ready source URLs |
+| `web_search` | Search Agent tool backed by the local crawler for live banking data, current loan rates, latest RBI announcements, recent financial news, with citation-ready source URLs |
 
 ## How It Works
 
@@ -227,7 +237,7 @@ payments, or financial regulations.
 3. `router_agent.py` decides whether to use local banking tools or `delegate_to_search_agent`.
 4. `delegate_to_search_agent` builds and runs the Search Agent for live/current banking questions.
 5. `search_agent.py` can only use `web_search` and summarizes the result with source URLs.
-6. `search_tool.py` calls `langchain-tavily`, formats search results with URLs, and injects a preferred official SBI source for SBI home-loan-rate questions.
+6. `search_tool.py` first checks an official banking source map, falls back to DuckDuckGo's no-key HTML results page, crawls candidate pages locally, and formats compact snippets with URLs.
 7. `knowledge.py` provides deterministic local answers for local tools.
 8. `service.py` keeps the older `build_agent()` and `run_agent()` functions for backward compatibility.
 9. `cli.py` manages the terminal chat loop and uses the two-agent system by default.
@@ -263,13 +273,12 @@ The script checks:
 - `.env` is ignored by git and should not be committed.
 - `agent.py` is intentionally small; the implementation lives inside the `banking_agent/` package.
 - Time-sensitive banking data can change. Verify current rates, rules, and regulations against official sources.
-- Live search requires a valid `TAVILY_API_KEY`.
-- `web_search` uses the `langchain-tavily` package, not the deprecated `langchain_community.tools.tavily_search.TavilySearchResults` class.
+- Live search does not require an external search API key.
+- `web_search` uses `requests` and `beautifulsoup4` to crawl official banking pages and DuckDuckGo HTML result links.
 
 ## Troubleshooting
 
 - If imports fail, make sure dependencies are installed in the same Python environment you use to run the app.
-- If `ModuleNotFoundError: No module named 'langchain_tavily'` appears while the virtual environment is active, run `.\venv\Scripts\python.exe -m pip install -r requirements.txt`.
 - If Groq calls fail, confirm `GROQ_API_KEY` is set correctly in `.env`.
-- If live search fails, confirm `TAVILY_API_KEY` is set correctly in `.env`.
+- If live search fails, confirm your network can reach the official bank/RBI pages and DuckDuckGo HTML.
 - If PowerShell cannot activate the virtual environment, run commands with `.\venv\Scripts\python.exe` directly.

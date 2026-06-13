@@ -6,7 +6,7 @@ from banking_agent.service import build_two_agent_system, run_two_agent_system
 def main() -> None:
     """Start the interactive CLI chat loop."""
     print("=" * 60)
-    print("Banking Domain Agent  (powered by LangGraph + Groq + Tavily)")
+    print("Banking Domain Agent  (powered by LangGraph + Groq + local crawler)")
     print("  Type 'exit' or 'quit' to stop.")
     print("=" * 60)
 

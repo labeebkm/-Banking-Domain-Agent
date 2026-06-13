@@ -35,7 +35,7 @@ def _clean_output(text: str) -> str:
 
 
 def build_search_query(user_query: str) -> str:
-    """Use the configured model to rewrite a banking question for web search."""
+    """Use the configured model to rewrite a banking question for the crawler."""
     try:
         llm = ChatGroq(
             model=MODEL_NAME,
@@ -61,7 +61,7 @@ def build_search_query(user_query: str) -> str:
 
 
 def _extract_source_urls(search_results: str) -> list[str]:
-    """Extract up to three unique source URLs from compact search results."""
+    """Extract up to three unique source URLs from compact crawler results."""
     urls: list[str] = []
     seen: set[str] = set()
     for match in SOURCE_URL_PATTERN.finditer(search_results):
@@ -81,7 +81,7 @@ def _format_source_list(urls: list[str]) -> str:
 
 
 def _finalize_summary(summary: str, search_results: str) -> str:
-    """Use the LLM answer but force sources to come from search results."""
+    """Use the LLM answer but force sources to come from crawler results."""
     urls = _extract_source_urls(search_results)
     answer = re.split(r"\n\s*Sources\s*:", summary, maxsplit=1, flags=re.IGNORECASE)[0].strip()
     if not answer.lower().startswith("answer:"):
@@ -123,7 +123,7 @@ def _repo_rate_uncertain_summary(search_results: str) -> str:
 
 
 def _summarize_search_results(query: str, search_results: str) -> str:
-    """Use one lightweight LLM call to turn compact search results into an answer."""
+    """Use one lightweight LLM call to turn compact crawler results into an answer."""
     llm = ChatGroq(
         model=MODEL_NAME,
         temperature=MODEL_TEMPERATURE,
@@ -134,13 +134,13 @@ def _summarize_search_results(query: str, search_results: str) -> str:
 User query:
 {query}
 
-Compact search results:
+Compact crawler results:
 {compact_results}
 
 Write the final response in exactly this format:
 
 Answer:
-<3-5 concise sentences. Use only facts supported by the snippets. Prefer official bank, RBI, regulator, or government URLs. If an official bank/RBI source is present, say it is the authoritative source. Do not invent exact rates if the snippets do not clearly provide them. If the results are insufficient, say the detail could not be confidently verified and advise checking the official source.>
+<3-5 concise sentences. Use only facts supported by the crawler snippets. Ignore navigation, footer, cookie, menu, login, and boilerplate text. Prefer official bank, RBI, regulator, or government URLs. If an official bank/RBI source is present, say it is the authoritative source. Do not invent exact rates if the snippets do not clearly provide them. If the results are insufficient, say the detail could not be confidently verified and advise checking the official source.>
 
 Sources:
 1. <url>
@@ -149,13 +149,13 @@ Sources:
 
 Use at most 3 source URLs and do not include duplicate URLs.
 For repo-rate questions, do not treat reverse repo rate, MSF rate, or Bank Rate as the RBI policy repo rate.
-Do not mention your knowledge cutoff. Do not use sources outside the compact search results.
+Do not mention your knowledge cutoff. Do not use sources outside the compact crawler results.
 """
     response = llm.invoke(
         [
             (
                 "system",
-                "You are a concise banking assistant summarizing compact web search snippets. Do not call tools.",
+                "You are a concise banking assistant summarizing compact crawler snippets. Do not call tools.",
             ),
             ("human", prompt),
         ]
@@ -206,7 +206,7 @@ def run_search_agent(agent: Any, query: str) -> str:
         _debug(f"Rewritten search query: {search_query}")
         tool_result = WEB_SEARCH_TOOL.invoke({"query": search_query})
     except Exception as exc:
-        recovered_response = _recover_failed_search_tool_call(exc)
+        recovered_response = _recover_failed_search_tool_call(exc, query)
         if recovered_response is not None:
             return recovered_response
 

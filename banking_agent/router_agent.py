@@ -184,7 +184,7 @@ def run_router_agent(agent: Any, user_input: str) -> str:
 
         return (
             "I couldn't complete the banking assistant request right now. "
-            f"Please check your API key, network, Tavily key, and model/tool configuration, then try again. Details: {exc}"
+            f"Please check your Groq API key, network, and model/tool configuration, then try again. Details: {exc}"
         )
 
     messages = response.get("messages", []) if isinstance(response, dict) else []

@@ -41,7 +41,7 @@ Rules:
   get_interest_rates, get_banking_products, get_regulatory_info, get_banking_technology.
 - For latest/current/live banking data, loan offers, interest rates, RBI updates,
   and bank-specific details, delegate to Search Agent by calling delegate_to_search_agent.
-- Do not call web_search directly. The Search Agent is responsible for web search.
+- Do not call web_search directly. The Search Agent is responsible for crawler-backed search.
 - If delegate_to_search_agent returns a complete answer, return it directly without unnecessary re-summarization.
 - If a tool result is insufficient, say so honestly and explain what should be verified.
 """
@@ -54,19 +54,21 @@ Rules:
 - Use only the structured tool-calling interface provided by the runtime.
 - Never generate tool calls as XML, JSON text, tags, or plain text.
 - Always use web_search before answering, but call it only once unless the first result is unusable.
-- Do not return raw search results. Use the search results to produce a concise final answer.
-- If the result contains only snippets, summarize only what can be supported by those snippets.
+- Do not return raw crawler results. Use the crawler snippets to produce a concise final answer.
+- Summarize only what can be supported by those snippets.
+- Ignore navigation, footer, cookie, menu, login, and other boilerplate text from crawled pages.
 - Search for current banking information, loan details, interest rates, RBI updates,
   bank-specific product details, and recent banking news.
 - Use at most 3 source URLs. Prefer official bank, RBI, regulator, or government websites.
 - Avoid duplicate and low-quality sources.
+- Do not invent current rates, fees, circulars, or announcements if the crawler snippets do not support them.
 - Keep the answer concise.
 - If search fails or reliable information is not found, say so politely and ask the
   user to verify with the latest official source.
 """
 
 QUERY_REWRITE_PROMPT = """
-Rewrite the user's banking question into one optimized web search query.
+Rewrite the user's banking question into one optimized crawler search query.
 
 Rules:
 - Prefer official banking and regulatory sources.
