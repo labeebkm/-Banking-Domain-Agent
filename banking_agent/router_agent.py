@@ -11,7 +11,7 @@ from langgraph.prebuilt import create_react_agent
 from banking_agent.config import DEBUG_AGENTS, GROQ_API_KEY, MODEL_NAME, MODEL_TEMPERATURE
 from banking_agent.guard import is_banking_related
 from banking_agent.prompts import OFF_TOPIC_RESPONSE, ROUTER_SYSTEM_PROMPT
-from banking_agent.search_agent import build_search_agent, run_search_agent
+from banking_agent.search_agent import run_search_agent
 from banking_agent.tools import BANKING_TOOLS
 
 
@@ -19,8 +19,7 @@ from banking_agent.tools import BANKING_TOOLS
 def delegate_to_search_agent(query: str) -> str:
     """Delegate current/live banking, loan, RBI, rate, or bank-specific product questions to the Search Agent."""
     _debug("Delegating to Search Agent")
-    search_agent = build_search_agent()
-    return run_search_agent(search_agent, query)
+    return run_search_agent(query)
 
 
 ROUTER_TOOLS = [*BANKING_TOOLS, delegate_to_search_agent]

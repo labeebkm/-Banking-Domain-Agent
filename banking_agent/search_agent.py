@@ -2,20 +2,18 @@
 
 import json
 import re
-from typing import Any
 
 from langchain_groq import ChatGroq
-from langgraph.prebuilt import create_react_agent
 
 from banking_agent.config import DEBUG_AGENTS, GROQ_API_KEY, MODEL_NAME, MODEL_TEMPERATURE
-from banking_agent.prompts import QUERY_REWRITE_PROMPT, SEARCH_SYSTEM_PROMPT
+from banking_agent.prompts import QUERY_REWRITE_PROMPT
 from banking_agent.search_tool import WEB_SEARCH_TOOL
 
 
 TOOL_CALL_PATTERN = re.compile(r"<function=(?P<name>\w+)\s*(?P<args>\{.*?\})</function>")
-RECURSION_LIMIT = 5
-SUMMARY_INPUT_LIMIT = 1800
+SUMMARY_INPUT_LIMIT = 3000
 SOURCE_URL_PATTERN = re.compile(r"URL:\s*(?P<url>\S+)")
+UNVERIFIED_URL_PATTERN = re.compile(r"UNVERIFIED_OFFICIAL_URL:\s*(?P<url>\S+)")
 QUERY_REWRITE_LIMIT = 160
 
 
@@ -61,17 +59,29 @@ def build_search_query(user_query: str) -> str:
 
 
 def _extract_source_urls(search_results: str) -> list[str]:
-    """Extract up to three unique source URLs from compact crawler results."""
+    """Extract up to three unique source URLs from compact crawler results.
+
+    Picks up both successfully crawled URLs (URL: ...) and official pages
+    that were reached but JS-rendered (UNVERIFIED_OFFICIAL_URL: ...).
+    """
     urls: list[str] = []
     seen: set[str] = set()
-    for match in SOURCE_URL_PATTERN.finditer(search_results):
-        url = match.group("url").strip()
-        if url and url not in seen:
-            seen.add(url)
-            urls.append(url)
-        if len(urls) == 3:
-            break
+    for pattern in (SOURCE_URL_PATTERN, UNVERIFIED_URL_PATTERN):
+        for match in pattern.finditer(search_results):
+            url = match.group("url").strip()
+            if url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+            if len(urls) == 3:
+                return urls
     return urls
+
+
+def _has_unverified_only(search_results: str) -> bool:
+    """Return True when all results are unverified official URLs with no crawled snippets."""
+    has_snippet = bool(re.search(r"Snippet:", search_results))
+    has_unverified = bool(UNVERIFIED_URL_PATTERN.search(search_results))
+    return has_unverified and not has_snippet
 
 
 def _format_source_list(urls: list[str]) -> str:
@@ -163,21 +173,6 @@ Do not mention your knowledge cutoff. Do not use sources outside the compact cra
     return getattr(response, "content", str(response)).strip()
 
 
-def build_search_agent() -> Any:
-    """Build the Search Agent, which can only use the web_search tool."""
-    llm = ChatGroq(
-        model=MODEL_NAME,
-        temperature=MODEL_TEMPERATURE,
-        api_key=GROQ_API_KEY,
-    )
-    llm_with_tools = llm.bind_tools([WEB_SEARCH_TOOL], tool_choice="auto")
-    return create_react_agent(
-        llm_with_tools,
-        tools=[WEB_SEARCH_TOOL],
-        prompt=SEARCH_SYSTEM_PROMPT,
-    )
-
-
 def _recover_failed_search_tool_call(error: Exception, query: str) -> str | None:
     """Recover when the Search Agent emits a malformed web_search tool call."""
     match = TOOL_CALL_PATTERN.search(str(error))
@@ -197,11 +192,10 @@ def _recover_failed_search_tool_call(error: Exception, query: str) -> str | None
         return _fallback_summary(tool_result)
 
 
-def run_search_agent(agent: Any, query: str) -> str:
+def run_search_agent(query: str) -> str:
     """Run the Search Agent and return its final summarized response."""
     _debug("Search Agent called")
     try:
-        # Single search call avoids repeated ReAct loops and keeps live queries cheap.
         search_query = build_search_query(query)
         _debug(f"Rewritten search query: {search_query}")
         tool_result = WEB_SEARCH_TOOL.invoke({"query": search_query})
@@ -230,6 +224,18 @@ def run_search_agent(agent: Any, query: str) -> str:
 
     if "No useful web search results were found" in tool_result or "Live search is unavailable" in tool_result:
         return _fallback_summary(tool_result)
+
+    # All official pages were JS-rendered — no snippet content available.
+    # Give a clear, honest answer with the official URLs for the user to verify.
+    if _has_unverified_only(tool_result):
+        urls = _extract_source_urls(tool_result)
+        return _clean_output(
+            "Answer:\n"
+            "The official bank website was identified but its rate information is loaded dynamically "
+            "and could not be extracted by the crawler. Please visit the official source directly "
+            "for the most accurate and up-to-date figures.\n\n"
+            + _format_source_list(urls)
+        )
 
     if _is_repo_rate_query(query) and not _has_recent_context(tool_result):
         return _repo_rate_uncertain_summary(tool_result)
