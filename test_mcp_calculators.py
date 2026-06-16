@@ -6,6 +6,7 @@ from mcp_server.calculators import (
     calculate_fd_maturity,
     check_loan_eligibility,
     compare_loan_options,
+    normalize_amount,
 )
 from banking_agent.router_agent import RouterAgent, run_router_agent
 
@@ -36,6 +37,40 @@ class McpCalculatorTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["maturity_amount"], 707389.10, places=2)
         self.assertAlmostEqual(result["interest_earned"], 207389.10, places=2)
+
+    def test_five_lakh_fd_uses_indian_unit_amount(self) -> None:
+        result = calculate_fd_maturity(
+            principal="5 lakh",
+            annual_rate=7,
+            tenure_years=5,
+            compounding_frequency=4,
+        )
+
+        self.assertAlmostEqual(result["maturity_amount"], 707389.10, places=2)
+        self.assertAlmostEqual(result["interest_earned"], 207389.10, places=2)
+
+    def test_twenty_five_lakh_loan_amount_uses_indian_unit_amount(self) -> None:
+        text_amount = check_loan_eligibility(
+            monthly_income=80000,
+            monthly_obligations=15000,
+            requested_loan_amount="25 lakh",
+            annual_rate=8.5,
+            tenure_years=20,
+        )
+        numeric_amount = check_loan_eligibility(
+            monthly_income=80000,
+            monthly_obligations=15000,
+            requested_loan_amount=2500000,
+            annual_rate=8.5,
+            tenure_years=20,
+        )
+
+        self.assertEqual(text_amount["estimated_emi"], numeric_amount["estimated_emi"])
+        self.assertEqual(text_amount["eligibility_status"], numeric_amount["eligibility_status"])
+
+    def test_one_crore_uses_indian_unit_amount(self) -> None:
+        self.assertEqual(normalize_amount("1 crore"), 10000000)
+        self.assertEqual(normalize_amount("1 cr"), 10000000)
 
     def test_compare_loan_options_selects_lowest_total_payment(self) -> None:
         result = compare_loan_options(

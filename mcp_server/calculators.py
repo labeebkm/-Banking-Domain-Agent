@@ -2,14 +2,49 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 MAX_FOIR_RATIO = 0.5
+AmountInput = float | int | str
 
 
-def _require_positive_number(name: str, value: float) -> float:
+def normalize_amount(value: AmountInput) -> float:
+    """Normalize rupee amounts, including Indian units such as lakh and crore."""
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if not isinstance(value, str):
+        raise ValueError("amount must be a number or string.")
+
+    amount_text = value.strip().lower()
+    amount_text = amount_text.replace(",", "").replace("rs.", "").replace("rs", "").replace("₹", "").strip()
+    unit_match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)\s*(lakh|lakhs|lac|lacs|crore|crores|cr|l)", amount_text)
+    if unit_match:
+        number = float(unit_match.group(1))
+        unit = unit_match.group(2)
+        if unit in {"lakh", "lakhs", "lac", "lacs", "l"}:
+            return number * 100_000
+        if unit in {"crore", "crores", "cr"}:
+            return number * 10_000_000
+
     try:
-        number = float(value)
+        return float(amount_text)
+    except ValueError as exc:
+        raise ValueError(
+            "amount must be a number or use Indian units such as '5 lakh' or '1 crore'."
+        ) from exc
+
+
+def _coerce_number(value: float | int | str) -> float:
+    if isinstance(value, str):
+        return float(value.strip().replace(",", "").replace("%", ""))
+    return float(value)
+
+
+def _require_positive_number(name: str, value: float | int | str) -> float:
+    try:
+        number = _coerce_number(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a number.") from exc
 
@@ -18,9 +53,20 @@ def _require_positive_number(name: str, value: float) -> float:
     return number
 
 
-def _require_non_negative_number(name: str, value: float) -> float:
+def _require_positive_amount(name: str, value: AmountInput) -> float:
     try:
-        number = float(value)
+        amount = normalize_amount(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} {exc}") from exc
+
+    if amount <= 0:
+        raise ValueError(f"{name} must be greater than zero.")
+    return amount
+
+
+def _require_non_negative_number(name: str, value: float | int | str) -> float:
+    try:
+        number = _coerce_number(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a number.") from exc
 
@@ -29,9 +75,9 @@ def _require_non_negative_number(name: str, value: float) -> float:
     return number
 
 
-def calculate_emi(principal: float, annual_rate: float, tenure_years: float) -> float:
+def calculate_emi(principal: AmountInput, annual_rate: float, tenure_years: float) -> float:
     """Calculate an estimated monthly EMI for a reducing-balance loan."""
-    principal_value = _require_positive_number("principal", principal)
+    principal_value = _require_positive_amount("principal", principal)
     rate_value = _require_non_negative_number("annual_rate", annual_rate)
     tenure_value = _require_positive_number("tenure_years", tenure_years)
 
@@ -48,16 +94,18 @@ def calculate_emi(principal: float, annual_rate: float, tenure_years: float) -> 
 
 
 def check_loan_eligibility(
-    monthly_income: float,
-    monthly_obligations: float,
-    requested_loan_amount: float,
+    monthly_income: AmountInput,
+    monthly_obligations: AmountInput,
+    requested_loan_amount: AmountInput,
     annual_rate: float,
     tenure_years: float,
 ) -> dict[str, Any]:
     """Estimate loan eligibility using EMI affordability and FOIR/DTI ratio."""
-    income = _require_positive_number("monthly_income", monthly_income)
-    obligations = _require_non_negative_number("monthly_obligations", monthly_obligations)
-    loan_amount = _require_positive_number("requested_loan_amount", requested_loan_amount)
+    income = _require_positive_amount("monthly_income", monthly_income)
+    obligations = normalize_amount(monthly_obligations)
+    if obligations < 0:
+        raise ValueError("monthly_obligations cannot be negative.")
+    loan_amount = _require_positive_amount("requested_loan_amount", requested_loan_amount)
     rate = _require_non_negative_number("annual_rate", annual_rate)
     tenure = _require_positive_number("tenure_years", tenure_years)
 
@@ -86,13 +134,13 @@ def check_loan_eligibility(
 
 
 def calculate_fd_maturity(
-    principal: float,
+    principal: AmountInput,
     annual_rate: float,
     tenure_years: float,
     compounding_frequency: int = 4,
 ) -> dict[str, float]:
     """Calculate fixed-deposit maturity amount and interest earned."""
-    principal_value = _require_positive_number("principal", principal)
+    principal_value = _require_positive_amount("principal", principal)
     rate_value = _require_non_negative_number("annual_rate", annual_rate)
     tenure_value = _require_positive_number("tenure_years", tenure_years)
 
@@ -112,7 +160,7 @@ def calculate_fd_maturity(
     }
 
 
-def compare_loan_options(options: list[dict[str, float]]) -> dict[str, Any]:
+def compare_loan_options(options: list[dict[str, AmountInput]]) -> dict[str, Any]:
     """Compare loan options and select the one with the lowest total payment."""
     if not isinstance(options, list) or not options:
         raise ValueError("options must be a non-empty list.")
@@ -122,7 +170,7 @@ def compare_loan_options(options: list[dict[str, float]]) -> dict[str, Any]:
         if not isinstance(option, dict):
             raise ValueError(f"Option {index} must be an object.")
 
-        principal = _require_positive_number(f"options[{index}].principal", option.get("principal"))
+        principal = _require_positive_amount(f"options[{index}].principal", option.get("principal"))
         annual_rate = _require_non_negative_number(f"options[{index}].annual_rate", option.get("annual_rate"))
         tenure_years = _require_positive_number(f"options[{index}].tenure_years", option.get("tenure_years"))
         months = int(round(tenure_years * 12))
@@ -147,4 +195,3 @@ def compare_loan_options(options: list[dict[str, float]]) -> dict[str, Any]:
         "best_option": best_option,
         "reason": "Best option is selected by the lowest estimated total payment.",
     }
-
