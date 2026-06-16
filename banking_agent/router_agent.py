@@ -1,6 +1,7 @@
 """Router agent that answers locally or delegates live-data questions."""
 
 import asyncio
+import ast
 import json
 import re
 import sys
@@ -53,6 +54,11 @@ BANK_SPECIFIC_TERMS = (
     "bank of baroda",
 )
 MCP_SERVER_PATH = Path(__file__).resolve().parent.parent / "mcp_server" / "server.py"
+MCP_CALCULATOR_TOOL_NAMES = {
+    "check_loan_eligibility",
+    "calculate_fd_maturity",
+    "compare_loan_options",
+}
 
 
 @dataclass(frozen=True)
@@ -223,11 +229,69 @@ def _recover_failed_tool_call(error: Exception, tools_by_name: dict[str, Any]) -
     )
 
 
+def _coerce_tool_content(content: Any) -> Any:
+    """Parse common LangChain tool content shapes into Python values."""
+    if isinstance(content, (dict, list)):
+        return content
+    if not isinstance(content, str):
+        return None
+
+    text = content.strip()
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        return ast.literal_eval(text)
+    except (SyntaxError, ValueError):
+        return None
+
+
+def _extract_formatted_summary(value: Any) -> str | None:
+    """Find a calculator formatted_summary in nested tool output."""
+    if isinstance(value, dict):
+        summary = value.get("formatted_summary")
+        if isinstance(summary, str) and summary.strip():
+            return summary
+        for child in value.values():
+            nested_summary = _extract_formatted_summary(child)
+            if nested_summary is not None:
+                return nested_summary
+    elif isinstance(value, list):
+        for item in value:
+            nested_summary = _extract_formatted_summary(item)
+            if nested_summary is not None:
+                return nested_summary
+    return None
+
+
+def _extract_calculator_tool_summary(messages: list[Any]) -> str | None:
+    """Return MCP calculator summaries directly to avoid LLM recalculation errors."""
+    for message in reversed(messages):
+        tool_name = getattr(message, "name", None)
+        content = getattr(message, "content", None)
+        parsed_content = _coerce_tool_content(content)
+        summary = _extract_formatted_summary(parsed_content)
+        if summary is None:
+            continue
+        if tool_name in MCP_CALCULATOR_TOOL_NAMES or tool_name is None:
+            return summary
+    return None
+
+
 def _extract_final_response(response: Any) -> str:
     """Extract final assistant text from a LangGraph response."""
     messages = response.get("messages", []) if isinstance(response, dict) else []
     if not messages:
         return "I couldn't produce a final banking response. Please try again."
+
+    calculator_summary = _extract_calculator_tool_summary(messages)
+    if calculator_summary is not None:
+        return calculator_summary
 
     final_message = messages[-1]
     return getattr(final_message, "content", str(final_message))

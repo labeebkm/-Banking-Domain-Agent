@@ -18,6 +18,7 @@ def normalize_amount(value: AmountInput) -> float:
         raise ValueError("amount must be a number or string.")
 
     amount_text = value.strip().lower()
+    amount_text = amount_text.replace("inr", "").replace("₹", "").replace("â‚¹", "")
     amount_text = amount_text.replace(",", "").replace("rs.", "").replace("rs", "").replace("₹", "").strip()
     unit_match = re.fullmatch(r"([+-]?\d+(?:\.\d+)?)\s*(lakh|lakhs|lac|lacs|crore|crores|cr|l)", amount_text)
     if unit_match:
@@ -40,6 +41,34 @@ def _coerce_number(value: float | int | str) -> float:
     if isinstance(value, str):
         return float(value.strip().replace(",", "").replace("%", ""))
     return float(value)
+
+
+def _format_indian_number(value: float) -> str:
+    """Format a number with Indian digit grouping."""
+    rounded = f"{value:.2f}"
+    integer_part, decimal_part = rounded.split(".")
+    sign = ""
+    if integer_part.startswith("-"):
+        sign = "-"
+        integer_part = integer_part[1:]
+
+    if len(integer_part) <= 3:
+        grouped = integer_part
+    else:
+        last_three = integer_part[-3:]
+        remaining = integer_part[:-3]
+        groups = []
+        while remaining:
+            groups.append(remaining[-2:])
+            remaining = remaining[:-2]
+        grouped = ",".join(reversed(groups)) + "," + last_three
+
+    return f"{sign}{grouped}.{decimal_part}"
+
+
+def _format_inr(value: float) -> str:
+    """Format a rupee value for calculator summaries."""
+    return f"INR {_format_indian_number(value)}"
 
 
 def _require_positive_number(name: str, value: float | int | str) -> float:
@@ -123,6 +152,9 @@ def check_loan_eligibility(
         reason = "Estimated EMI exceeds the maximum affordable EMI at a 50% FOIR threshold."
 
     return {
+        "requested_loan_amount": round(loan_amount, 2),
+        "monthly_income": round(income, 2),
+        "monthly_obligations": round(obligations, 2),
         "eligible": eligible,
         "eligibility_status": "eligible" if eligible else "not eligible",
         "estimated_emi": round(estimated_emi, 2),
@@ -130,6 +162,14 @@ def check_loan_eligibility(
         "foir_dti_percentage": round(foir_ratio * 100, 2),
         "max_affordable_emi": round(max_affordable_emi, 2),
         "reason": reason,
+        "formatted_summary": (
+            f"Eligibility status: {'eligible' if eligible else 'not eligible'}\n"
+            f"Requested loan amount: {_format_inr(loan_amount)}\n"
+            f"Estimated EMI: {_format_inr(estimated_emi)}\n"
+            f"FOIR/DTI ratio: {foir_ratio * 100:.2f}%\n"
+            f"Maximum affordable EMI: {_format_inr(max_affordable_emi)}\n"
+            f"Reason: {reason}"
+        ),
     }
 
 
@@ -155,8 +195,17 @@ def calculate_fd_maturity(
     maturity_amount = principal_value * ((1 + (rate_value / 100) / frequency) ** (frequency * tenure_value))
     interest_earned = maturity_amount - principal_value
     return {
+        "principal": round(principal_value, 2),
+        "annual_rate": round(rate_value, 4),
+        "tenure_years": round(tenure_value, 2),
+        "compounding_frequency": frequency,
         "maturity_amount": round(maturity_amount, 2),
         "interest_earned": round(interest_earned, 2),
+        "formatted_summary": (
+            f"Principal: {_format_inr(principal_value)}\n"
+            f"Maturity amount: {_format_inr(maturity_amount)}\n"
+            f"Interest earned: {_format_inr(interest_earned)}"
+        ),
     }
 
 
@@ -183,9 +232,16 @@ def compare_loan_options(options: list[dict[str, AmountInput]]) -> dict[str, Any
                 "principal": round(principal, 2),
                 "annual_rate": round(annual_rate, 4),
                 "tenure_years": round(tenure_years, 2),
+                "months": months,
                 "estimated_emi": round(emi, 2),
                 "total_interest": round(total_interest, 2),
                 "total_payment": round(total_payment, 2),
+                "formatted_summary": (
+                    f"Option {index}: Principal {_format_inr(principal)}, "
+                    f"Rate {annual_rate:.2f}%, Tenure {tenure_years:.2f} years, "
+                    f"EMI {_format_inr(emi)}, Total interest {_format_inr(total_interest)}, "
+                    f"Total payment {_format_inr(total_payment)}"
+                ),
             }
         )
 
@@ -194,4 +250,10 @@ def compare_loan_options(options: list[dict[str, AmountInput]]) -> dict[str, Any
         "comparison": comparison,
         "best_option": best_option,
         "reason": "Best option is selected by the lowest estimated total payment.",
+        "formatted_summary": (
+            "Loan comparison:\n"
+            + "\n".join(item["formatted_summary"] for item in comparison)
+            + "\nBest option: "
+            f"Option {best_option['option']} with total payment {_format_inr(best_option['total_payment'])}."
+        ),
     }

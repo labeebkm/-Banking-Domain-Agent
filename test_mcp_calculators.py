@@ -1,5 +1,6 @@
 """Tests for the banking calculator MCP tool logic."""
 
+import json
 import unittest
 
 from mcp_server.calculators import (
@@ -48,6 +49,8 @@ class McpCalculatorTests(unittest.TestCase):
 
         self.assertAlmostEqual(result["maturity_amount"], 707389.10, places=2)
         self.assertAlmostEqual(result["interest_earned"], 207389.10, places=2)
+        self.assertEqual(result["principal"], 500000)
+        self.assertIn("Interest earned: INR 2,07,389.10", result["formatted_summary"])
 
     def test_twenty_five_lakh_loan_amount_uses_indian_unit_amount(self) -> None:
         text_amount = check_loan_eligibility(
@@ -84,6 +87,34 @@ class McpCalculatorTests(unittest.TestCase):
         self.assertEqual(len(result["comparison"]), 3)
         self.assertEqual(result["best_option"]["option"], 2)
 
+    def test_loan_comparison_ten_lakh_nine_percent_fifteen_years(self) -> None:
+        result = compare_loan_options(
+            [
+                {"principal": "10 lakh", "annual_rate": 9, "tenure_years": 15},
+            ]
+        )
+
+        option = result["comparison"][0]
+        self.assertEqual(option["principal"], 1000000)
+        self.assertEqual(option["months"], 180)
+        self.assertAlmostEqual(option["estimated_emi"], 10142.67, places=2)
+        self.assertAlmostEqual(option["total_payment"], 1825680.60, places=2)
+        self.assertAlmostEqual(option["total_interest"], 825680.60, places=2)
+
+    def test_loan_comparison_ten_lakh_eight_point_five_percent_twenty_years(self) -> None:
+        result = compare_loan_options(
+            [
+                {"principal": "10 lakh", "annual_rate": 8.5, "tenure_years": 20},
+            ]
+        )
+
+        option = result["comparison"][0]
+        self.assertEqual(option["principal"], 1000000)
+        self.assertEqual(option["months"], 240)
+        self.assertAlmostEqual(option["estimated_emi"], 8678.23, places=2)
+        self.assertAlmostEqual(option["total_payment"], 2082775.20, places=2)
+        self.assertAlmostEqual(option["total_interest"], 1082775.20, places=2)
+
     def test_invalid_inputs_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
             calculate_fd_maturity(
@@ -106,6 +137,38 @@ class McpCalculatorTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "async graph ok")
+
+    def test_router_prefers_calculator_formatted_summary(self) -> None:
+        correct_summary = (
+            "Principal: INR 5,00,000.00\n"
+            "Maturity amount: INR 7,07,389.10\n"
+            "Interest earned: INR 2,07,389.10"
+        )
+
+        class AsyncGraph:
+            async def ainvoke(self, payload: dict, config: dict | None = None) -> dict:
+                return {
+                    "messages": [
+                        type(
+                            "ToolMessage",
+                            (),
+                            {
+                                "name": "calculate_fd_maturity",
+                                "content": json.dumps({"formatted_summary": correct_summary}),
+                            },
+                        )(),
+                        type("Message", (), {"content": "Interest earned is INR 20,73,891"})(),
+                    ]
+                }
+
+        agent = RouterAgent(graph=AsyncGraph(), tools=[], tools_by_name={})
+
+        result = run_router_agent(
+            agent,
+            "What will be the maturity amount for a 5 lakh FD at 7% for 5 years with quarterly compounding?",
+        )
+
+        self.assertEqual(result, correct_summary)
 
 
 if __name__ == "__main__":

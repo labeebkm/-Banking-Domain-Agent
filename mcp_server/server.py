@@ -48,7 +48,7 @@ def calculate_fd_maturity(
     annual_rate: float,
     tenure_years: float,
     compounding_frequency: int = 4,
-) -> dict[str, float] | dict[str, str]:
+) -> dict[str, Any]:
     """Calculate FD maturity. Rupee principal may be a number or Indian units: 5 lakh = 500000, 1 crore = 10000000."""
     try:
         return calculate_fd_maturity_logic(
