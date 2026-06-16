@@ -17,6 +17,8 @@ search API.
   live search before invoking the router LLM.
 - Uses a LangGraph ReAct router for banking questions that do not match a direct
   deterministic route.
+- Extends the router with a local MCP server for loan eligibility, FD maturity,
+  and loan-option comparison calculators.
 - Rewrites live-search questions with Groq, discovers candidate pages through
   DuckDuckGo HTML, crawls useful pages, and summarizes supported snippets.
 - Returns at most three source URLs and preserves official bank URLs for manual
@@ -45,7 +47,13 @@ official bank or regulator website before acting.
 |   |-- search_tool.py        # URL discovery, crawling, filtering, formatting
 |   |-- service.py            # Public build/run service functions
 |   `-- tools.py              # LangChain tools over local knowledge
+|-- mcp_server/
+|   |-- __init__.py
+|   |-- calculators.py        # Pure loan and FD calculator logic
+|   `-- server.py             # FastMCP stdio server
+|-- MCP_USAGE.md              # MCP architecture and usage notes
 |-- test_search_tool.py       # Crawler regression tests
+|-- test_mcp_calculators.py   # MCP calculator regression tests
 |-- test_two_agent.py         # Manual end-to-end smoke script
 |-- requirements.txt
 |-- .env.example
@@ -72,6 +80,7 @@ Local-tool heuristic
     v
 LangGraph ReAct router
     |-- local knowledge tool -------------> local answer
+    |-- MCP calculator tool --------------> loan/FD calculation
     `-- delegate_to_search_agent ---------> search pipeline
 ```
 
@@ -90,6 +99,9 @@ The router can use these tools:
 | `get_regulatory_info` | RBI, repo rate, Basel III, KYC, DICGC, FDIC, NPA, IFRS |
 | `get_banking_technology` | UPI, NEFT, RTGS, SWIFT, core banking, open banking |
 | `delegate_to_search_agent` | Current or bank-specific information requiring live search |
+| `check_loan_eligibility` | EMI, FOIR/DTI, affordability, and eligibility estimates |
+| `calculate_fd_maturity` | Fixed-deposit maturity and interest earned |
+| `compare_loan_options` | EMI, interest, total payment, and best loan option |
 
 Local values live in `banking_agent/knowledge.py`. They are deterministic and
 may be illustrative or time-sensitive, so they should not be treated as a
@@ -136,6 +148,8 @@ Python packages are declared in `requirements.txt`:
 - `python-dotenv`
 - `requests`
 - `beautifulsoup4`
+- `mcp`
+- `langchain-mcp-adapters`
 
 ## Setup
 
@@ -210,8 +224,12 @@ print(answer)
 ```
 
 Despite the compatibility name `build_two_agent_system`, the returned object is
-the LangGraph router. Search is delegated to the procedural workflow in
+a router wrapper containing the LangGraph router and the merged local/Search/MCP
+tool registry. Search is delegated to the procedural workflow in
 `search_agent.py`.
+
+For async contexts, use `build_two_agent_system_async()` so MCP tools can be
+loaded without blocking an already-running event loop.
 
 ## Testing
 
@@ -219,6 +237,12 @@ Run the crawler regression suite:
 
 ```powershell
 python -m unittest -v test_search_tool.py
+```
+
+Run the MCP calculator regression suite:
+
+```powershell
+python -m unittest -v test_mcp_calculators.py
 ```
 
 Run the manual smoke script, which requires a valid Groq key and network access:
