@@ -142,6 +142,53 @@ def _is_calculator_intent(question_lower: str) -> bool:
     return any(term in question_lower for term in calculator_terms) and any(term in question_lower for term in product_terms)
 
 
+def _parse_compare_loan_options_query(user_input: str) -> list[dict[str, Any]]:
+    """Parse simple natural-language loan comparison prompts into tool arguments."""
+    option_pattern = re.compile(
+        r"(?P<principal>(?:inr|rs\.?|rupees|₹)?\s*\d+(?:,\d{2,3})*(?:\.\d+)?\s*(?:lakh|lakhs|lac|lacs|crore|crores|cr)?)"
+        r"\s+at\s+(?P<annual_rate>\d+(?:\.\d+)?)\s*%?\s+for\s+(?P<tenure_years>\d+(?:\.\d+)?)\s*years?",
+        flags=re.IGNORECASE,
+    )
+    options: list[dict[str, Any]] = []
+    for match in option_pattern.finditer(user_input):
+        principal = re.sub(r"\s+", " ", match.group("principal")).strip()
+        options.append(
+            {
+                "principal": principal,
+                "annual_rate": float(match.group("annual_rate")),
+                "tenure_years": float(match.group("tenure_years")),
+            }
+        )
+    return options
+
+
+def _try_compare_loan_options_shortcut(user_input: str, tools_by_name: dict[str, Any]) -> str | None:
+    """Call compare_loan_options directly for clear natural-language compare prompts."""
+    question_lower = user_input.lower()
+    if "compare" not in question_lower or "loan" not in question_lower:
+        return None
+
+    compare_tool = tools_by_name.get("compare_loan_options")
+    if compare_tool is None:
+        return None
+
+    options = _parse_compare_loan_options_query(user_input)
+    if len(options) < 2:
+        return None
+
+    try:
+        result = compare_tool.invoke({"options": options})
+    except Exception:
+        return None
+
+    parsed_result = _coerce_tool_content(result)
+    summary = _extract_formatted_summary(parsed_result)
+    if summary is not None:
+        return summary
+
+    return str(result)
+
+
 async def _load_mcp_tools() -> list[Any]:
     """Load MCP tools from the local stdio server."""
     try:
@@ -336,6 +383,10 @@ async def run_router_agent_async(agent: Any, user_input: str) -> str:
     if local_response is not None:
         return local_response
 
+    compare_shortcut_response = _try_compare_loan_options_shortcut(user_input, tools_by_name)
+    if compare_shortcut_response is not None:
+        return compare_shortcut_response
+
     try:
         response = await _run_router_graph_async(graph, user_input)
     except Exception as exc:
@@ -374,6 +425,10 @@ def run_router_agent(agent: Any, user_input: str) -> str:
     local_response = _answer_with_local_tool(user_input)
     if local_response is not None:
         return local_response
+
+    compare_shortcut_response = _try_compare_loan_options_shortcut(user_input, tools_by_name)
+    if compare_shortcut_response is not None:
+        return compare_shortcut_response
 
     try:
         response = _run_router_graph_sync(graph, user_input)

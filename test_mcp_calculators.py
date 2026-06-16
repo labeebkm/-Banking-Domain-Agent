@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from typing import Any
 
 from mcp_server.calculators import (
     calculate_fd_maturity,
@@ -115,6 +116,18 @@ class McpCalculatorTests(unittest.TestCase):
         self.assertAlmostEqual(option["total_payment"], 2082775.20, places=2)
         self.assertAlmostEqual(option["total_interest"], 1082775.20, places=2)
 
+    def test_compare_loan_options_formatted_summary_for_ten_lakh_scenario(self) -> None:
+        result = compare_loan_options(
+            [
+                {"principal": "10 lakh", "annual_rate": 8.5, "tenure_years": 20},
+                {"principal": "10 lakh", "annual_rate": 9.0, "tenure_years": 15},
+            ]
+        )
+
+        self.assertIn("Option 2", result["formatted_summary"])
+        self.assertIn("Principal INR 10,00,000.00", result["formatted_summary"])
+        self.assertIn("Total payment INR 18,25,680.60", result["formatted_summary"])
+
     def test_invalid_inputs_are_rejected(self) -> None:
         with self.assertRaises(ValueError):
             calculate_fd_maturity(
@@ -137,6 +150,43 @@ class McpCalculatorTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "async graph ok")
+
+    def test_router_compare_shortcut_preserves_ten_lakh_amount_phrase(self) -> None:
+        captured_args: dict[str, Any] = {}
+        expected_summary = (
+            "Loan comparison:\n"
+            "Option 1: Principal INR 10,00,000.00, Rate 8.50%, Tenure 20.00 years, EMI INR 8,678.23, "
+            "Total interest INR 10,82,775.20, Total payment INR 20,82,775.20\n"
+            "Option 2: Principal INR 10,00,000.00, Rate 9.00%, Tenure 15.00 years, EMI INR 10,142.67, "
+            "Total interest INR 8,25,680.60, Total payment INR 18,25,680.60\n"
+            "Best option: Option 2 with total payment INR 18,25,680.60."
+        )
+
+        class CompareTool:
+            name = "compare_loan_options"
+
+            def invoke(self, args: dict[str, Any]) -> dict[str, str]:
+                captured_args.update(args)
+                return {"formatted_summary": expected_summary}
+
+        class FailingGraph:
+            async def ainvoke(self, payload: dict, config: dict | None = None) -> dict:
+                raise AssertionError("Graph should not be used for compare shortcut.")
+
+        agent = RouterAgent(
+            graph=FailingGraph(),
+            tools=[],
+            tools_by_name={"compare_loan_options": CompareTool()},
+        )
+
+        result = run_router_agent(
+            agent,
+            "Compare these loan options: ₹10 lakh at 8.5% for 20 years and ₹10 lakh at 9.0% for 15 years",
+        )
+
+        self.assertEqual(captured_args["options"][0]["principal"], "₹10 lakh")
+        self.assertEqual(captured_args["options"][1]["principal"], "₹10 lakh")
+        self.assertEqual(result, expected_summary)
 
     def test_router_prefers_calculator_formatted_summary(self) -> None:
         correct_summary = (

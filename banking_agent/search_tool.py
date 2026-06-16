@@ -108,6 +108,33 @@ GROWW_SOURCE_MAP: tuple[dict[str, Any], ...] = (
     },
 )
 
+HOME_LOAN_SOURCE_MAP: tuple[dict[str, Any], ...] = (
+    {
+        "keywords": ("sbi home loan", "state bank of india home loan", "sbi housing loan"),
+        "urls": (
+            "https://www.paisabazaar.com/home-loan/sbi-home-loan/",
+            "https://www.bankbazaar.com/home-loan/sbi-home-loan-interest-rate.html",
+            "https://homeloans.sbi/",
+        ),
+    },
+    {
+        "keywords": ("hdfc home loan", "hdfc housing loan"),
+        "urls": (
+            "https://www.paisabazaar.com/home-loan/hdfc-home-loan/",
+            "https://www.bankbazaar.com/home-loan/hdfc-home-loan-interest-rate.html",
+            "https://www.hdfcbank.com/personal/borrow/popular-loans/home-loan",
+        ),
+    },
+    {
+        "keywords": ("icici home loan", "icici bank home loan", "icici housing loan"),
+        "urls": (
+            "https://www.paisabazaar.com/home-loan/icici-home-loan/",
+            "https://www.bankbazaar.com/home-loan/icici-home-loan-interest-rate.html",
+            "https://www.icicibank.com/personal-banking/loans/home-loan",
+        ),
+    },
+)
+
 # ---------------------------------------------------------------------------
 # Tier 3 — Bank official homepages (citation-only fallback)
 # Appended only when Tiers 1 and 2 together produce fewer than MAX_CANDIDATE_URLS.
@@ -239,6 +266,15 @@ def _mapped_groww_urls(query: str) -> list[str]:
     return []
 
 
+def _mapped_home_loan_urls(query: str) -> list[str]:
+    """Return crawlable home-loan rate URLs for known bank queries."""
+    query_lower = query.lower()
+    for source in HOME_LOAN_SOURCE_MAP:
+        if any(kw in query_lower for kw in source["keywords"]):
+            return list(source["urls"])
+    return []
+
+
 def _generic_homepage_urls(query: str) -> list[str]:
     query_lower = query.lower()
     return [
@@ -296,6 +332,24 @@ def _resolve_duckduckgo_urls(query: str) -> list[str]:
     return urls
 
 
+def _get_with_retry(url: str) -> requests.Response:
+    """Fetch a URL, retrying once on read timeout."""
+    try:
+        response = requests.get(
+            url,
+            headers={"User-Agent": USER_AGENT},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+    except requests.ReadTimeout:
+        response = requests.get(
+            url,
+            headers={"User-Agent": USER_AGENT},
+            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
+        )
+    response.raise_for_status()
+    return response
+
+
 def _candidate_urls(query: str) -> list[str]:
     """Build the crawl candidate list using a three-tier priority strategy.
 
@@ -323,6 +377,10 @@ def _candidate_urls(query: str) -> list[str]:
             candidates.append(url)
 
     # Tier 2 — DuckDuckGo dynamic discovery
+    for url in _mapped_home_loan_urls(query):
+        if url not in candidates:
+            candidates.append(url)
+
     try:
         ddg_urls = _resolve_duckduckgo_urls(query)
         candidates.extend(url for url in ddg_urls if url not in candidates)
@@ -351,11 +409,28 @@ def _title_from_soup(soup: BeautifulSoup, url: str) -> str:
 
 
 def _extract_page_lines(soup: BeautifulSoup) -> list[str]:
+    lines: list[str] = []
+
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        json_text = _clean_text(script.get_text(" "), limit=800)
+        for value in re.findall(r'"(?:name|description)"\s*:\s*"([^"]+)"', json_text):
+            cleaned = _clean_text(value, limit=400)
+            if len(cleaned) >= 8:
+                lines.append(cleaned)
+
+    for row in soup.find_all("tr", limit=120):
+        cells = [
+            _clean_text(cell.get_text(" "), limit=160)
+            for cell in row.find_all(["th", "td"], recursive=False)
+        ]
+        cells = [cell for cell in cells if cell]
+        if len(cells) >= 2:
+            lines.append(" | ".join(cells))
+
     for element in soup(["script", "style", "noscript", "nav", "footer", "header", "svg"]):
         element.decompose()
 
     root = soup.find("main") or soup.find("article") or soup.body or soup
-    lines: list[str] = []
     for element in root.find_all(
         ["h1", "h2", "h3", "p", "li", "td", "th", "tr", "div", "span"], limit=420
     ):
@@ -436,18 +511,38 @@ def _snippet_has_useful_content(snippet: str, query: str) -> bool:
 
     return True
 
+
+def _snippet_matches_query(snippet: str, query: str, title: str = "", url: str = "") -> bool:
+    """Return True when a snippet appears relevant to the requested product."""
+    haystack = f"{snippet} {title} {url}".lower()
+    query_lower = query.lower()
+
+    product_phrases = (
+        "home loan",
+        "personal loan",
+        "car loan",
+        "fixed deposit",
+        "savings account",
+        "credit card",
+    )
+    requested_products = [phrase for phrase in product_phrases if phrase in query_lower]
+    if requested_products and not any(phrase in haystack for phrase in requested_products):
+        return False
+
+    bank_terms = ("sbi", "state bank", "hdfc", "icici", "axis")
+    requested_banks = [term for term in bank_terms if term in query_lower]
+    if requested_banks and not any(term in haystack for term in requested_banks):
+        return False
+
+    return _snippet_has_useful_content(snippet, query)
+
 # ---------------------------------------------------------------------------
 # Crawl a single page
 # ---------------------------------------------------------------------------
 
 def _crawl_page(url: str, query: str) -> dict[str, str] | None:
     try:
-        response = requests.get(
-            url,
-            headers={"User-Agent": USER_AGENT},
-            timeout=(CONNECT_TIMEOUT, READ_TIMEOUT),
-        )
-        response.raise_for_status()
+        response = _get_with_retry(url)
     except Exception as exc:
         _debug(f"Crawl failed for {url}: {exc}")
         return None
@@ -464,12 +559,13 @@ def _crawl_page(url: str, query: str) -> dict[str, str] | None:
     lines = _extract_page_lines(soup)
     snippet = _relevant_snippet(lines, query)
 
-    if not _snippet_has_useful_content(snippet, query):
+    title = _title_from_soup(soup, url)
+    if not _snippet_matches_query(snippet, query, title, url):
         _debug(f"Skipping low-content snippet for {url}")
         return None
 
     return {
-        "title":   _title_from_soup(soup, url),
+        "title":   title,
         "url":     _clean_url(url),
         "content": snippet,
     }
@@ -501,7 +597,7 @@ def _format_search_results(
         )
 
     for url in failed_official_urls[:3]:
-        sections.append(f"UNVERIFIED_OFFICIAL_URL: {url}")
+        sections.append(f"UNVERIFIED_OFFICIAL_URL: {url}\nURL: {url}\nStatus: Unverified")
 
     return "\n\n".join(sections)
 

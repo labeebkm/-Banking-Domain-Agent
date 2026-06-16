@@ -59,6 +59,18 @@ class SearchToolTests(unittest.TestCase):
             )
         )
 
+    @patch("banking_agent.search_tool._resolve_duckduckgo_urls")
+    def test_home_loan_queries_include_crawlable_rate_pages(self, ddg: Mock) -> None:
+        ddg.return_value = []
+
+        sbi_urls = search_tool._candidate_urls("latest SBI home loan interest rate official SBI")
+        hdfc_urls = search_tool._candidate_urls("current HDFC home loan interest rate official HDFC Bank")
+        icici_urls = search_tool._candidate_urls("latest ICICI Bank home loan interest rate official ICICI Bank")
+
+        self.assertTrue(any("paisabazaar.com/home-loan/sbi-home-loan" in url for url in sbi_urls))
+        self.assertTrue(any("paisabazaar.com/home-loan/hdfc-home-loan" in url for url in hdfc_urls))
+        self.assertTrue(any("paisabazaar.com/home-loan/icici-home-loan" in url for url in icici_urls))
+
     @patch("banking_agent.search_tool.requests.get")
     def test_request_retries_once_with_split_timeout(self, get: Mock) -> None:
         response = Mock()
