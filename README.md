@@ -13,6 +13,9 @@ search API.
 - Limits responses to banking and finance topics with a keyword-based guard.
 - Answers common product, regulation, rate, and payment-system questions from
   local dictionaries.
+- Answers several common conceptual banking questions directly from local
+  deterministic knowledge, including secured vs unsecured loans, inflation and
+  rates, home-loan pros and cons, and product suggestions for salaried users.
 - Routes latest, current, recent, year-specific, and bank-specific questions to
   live search before invoking the router LLM.
 - Uses a LangGraph ReAct router for banking questions that do not match a direct
@@ -54,6 +57,7 @@ official bank or regulator website before acting.
 |-- MCP_USAGE.md              # MCP architecture and usage notes
 |-- test_search_tool.py       # Crawler regression tests
 |-- test_mcp_calculators.py   # MCP calculator regression tests
+|-- test_router_local_routing.py # Router shortcut regression tests
 |-- test_two_agent.py         # Manual end-to-end smoke script
 |-- requirements.txt
 |-- .env.example
@@ -95,8 +99,8 @@ The router can use these tools:
 | Tool | Topics |
 | --- | --- |
 | `get_interest_rates` | Savings, fixed deposits, home loans, personal loans, car loans |
-| `get_banking_products` | Accounts, cards, loans, demat accounts, NRI accounts |
-| `get_regulatory_info` | RBI, repo rate, Basel III, KYC, DICGC, FDIC, NPA, IFRS |
+| `get_banking_products` | Accounts, cards, loans, demat accounts, NRI accounts, secured vs unsecured loans, and product-fit questions |
+| `get_regulatory_info` | RBI, repo rate, Basel III, KYC, DICGC, FDIC, NPA, IFRS, and inflation/rate relationships |
 | `get_banking_technology` | UPI, NEFT, RTGS, SWIFT, core banking, open banking |
 | `delegate_to_search_agent` | Current or bank-specific information requiring live search |
 | `check_loan_eligibility` | EMI, FOIR/DTI, affordability, and eligibility estimates |
@@ -119,6 +123,8 @@ not a second LangGraph graph. Its steps are:
    - stable RBI pages for RBI-related queries;
    - known crawlable Groww pages for selected SBI, HDFC, ICICI, and Axis Bank
      fixed-deposit queries;
+   - scoped crawlable home-loan pages for selected SBI, HDFC, and ICICI rate
+     queries;
    - dynamic DuckDuckGo HTML results for other bank and product pages;
    - official bank homepages as citation-only fallbacks.
 4. Remove duplicate and low-quality URLs, then prioritize official domains,
@@ -206,6 +212,10 @@ Example questions:
 What is KYC?
 How does UPI work?
 What is a demat account?
+Explain the difference between secured and unsecured loans.
+What banking products are suitable for a salaried person?
+What will be the maturity amount for a 5 lakh FD at 7% for 5 years?
+Compare these loan options: 10 lakh at 8.5% for 20 years and 10 lakh at 9.0% for 15 years.
 What are the latest SBI home loan rates?
 What are the latest RBI announcements?
 ```
@@ -229,7 +239,8 @@ tool registry. Search is delegated to the procedural workflow in
 `search_agent.py`.
 
 For async contexts, use `build_two_agent_system_async()` so MCP tools can be
-loaded without blocking an already-running event loop.
+loaded without blocking an already-running event loop. Use
+`run_two_agent_system_async()` to run queries through the same async-safe path.
 
 ## Testing
 
@@ -245,6 +256,12 @@ Run the MCP calculator regression suite:
 python -m unittest -v test_mcp_calculators.py
 ```
 
+Run the deterministic router shortcut regression suite:
+
+```powershell
+python -m unittest -v test_router_local_routing.py
+```
+
 Run the manual smoke script, which requires a valid Groq key and network access:
 
 ```powershell
@@ -254,12 +271,6 @@ python test_two_agent.py
 The smoke script checks a local KYC question, an SBI live-rate question, an RBI
 announcement question, and an off-topic question.
 
-At the current repository snapshot, all Python files compile, but
-`test_search_tool.py` is partially out of sync with the crawler implementation:
-four of its seven tests fail because they expect removed helpers, older table
-formatting, and an older unverified-source format. The application code and
-tests should be reconciled before treating that suite as a passing CI gate.
-
 ## Configuration And Routing Notes
 
 - `GROQ_API_KEY` is loaded from `.env` with `python-dotenv`.
@@ -268,6 +279,8 @@ tests should be reconciled before treating that suite as a passing CI gate.
   `recent`, `live`, `offer`, `2025`, and `2026`.
 - Bank-specific loan, rate, interest, product, account, card, RBI, or repo
   questions are also routed directly to search.
+- Deterministic local shortcuts also handle several broad conceptual questions
+  to reduce Groq usage and avoid unnecessary router loops.
 - The domain guard is keyword-based, not a semantic classifier. A special check
   rejects common `capital of ...` questions that would otherwise match the
   ambiguous banking keyword `capital`.

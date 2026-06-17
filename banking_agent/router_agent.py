@@ -120,7 +120,19 @@ def _answer_with_local_tool(user_input: str) -> str | None:
         return None
 
     tool = None
-    if any(term in question_lower for term in ("savings account", "current account", "demat", "nri account", "card")):
+    if "inflation" in question_lower:
+        tool = LOCAL_TOOL_BY_NAME["get_regulatory_info"]
+    elif any(term in question_lower for term in ("secured loan", "unsecured loan", "secured and unsecured", "collateral")):
+        tool = LOCAL_TOOL_BY_NAME["get_banking_products"]
+    elif "home loan" in question_lower and any(
+        term in question_lower for term in ("advantage", "disadvantage", "pros", "cons", "benefit", "drawback")
+    ):
+        tool = LOCAL_TOOL_BY_NAME["get_banking_products"]
+    elif "salaried" in question_lower and any(
+        term in question_lower for term in ("suitable", "suit", "best", "recommend", "product", "products")
+    ):
+        tool = LOCAL_TOOL_BY_NAME["get_banking_products"]
+    elif any(term in question_lower for term in ("savings account", "current account", "demat", "nri account", "card")):
         tool = LOCAL_TOOL_BY_NAME["get_banking_products"]
     elif any(term in question_lower for term in ("upi", "neft", "rtgs", "swift", "core banking", "open banking")):
         tool = LOCAL_TOOL_BY_NAME["get_banking_technology"]
