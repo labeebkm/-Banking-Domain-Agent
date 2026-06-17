@@ -38,6 +38,35 @@ BANKING_PRODUCTS = {
         "NRI account types include NRE, NRO, and FCNR accounts, each with different "
         "taxation, currency, and repatriation rules."
     ),
+    "secured loan": (
+        "A secured loan is backed by collateral such as property, a vehicle, deposits, "
+        "or other assets. Because lender risk is lower, secured loans usually have "
+        "lower interest rates, higher borrowing limits, and longer tenures, but the "
+        "collateral can be repossessed on default."
+    ),
+    "unsecured loan": (
+        "An unsecured loan does not require collateral. Approval depends more on income, "
+        "credit score, and repayment history. These loans are usually faster to obtain, "
+        "but they often carry higher interest rates, smaller limits, and shorter tenures."
+    ),
+    "secured and unsecured loans": (
+        "Secured loans require collateral and usually offer lower rates and higher limits, "
+        "while unsecured loans do not require collateral but typically have higher rates "
+        "and stricter credit-based approval."
+    ),
+    "advantages and disadvantages of home loans": (
+        "Advantages of home loans include spreading the cost of a property over a long tenure, "
+        "possible tax benefits where applicable, and access to a large loan amount at relatively "
+        "lower rates than many unsecured loans. Disadvantages include long repayment commitments, "
+        "interest cost over time, processing and legal charges, and the risk of losing the property "
+        "if repayments are not maintained."
+    ),
+    "salaried person": (
+        "Suitable banking products for a salaried person often include a salary or savings account, "
+        "an emergency fixed or recurring deposit, a credit card used with disciplined repayment, "
+        "net banking and UPI services, and needs-based loans such as home, vehicle, or personal loans "
+        "chosen according to repayment capacity."
+    ),
     "loan": "Loan types include home, personal, car, education, gold, business, and loan against property.",
 }
 
@@ -85,6 +114,12 @@ REGULATIONS = {
     "ifrs": (
         "IFRS 9 requires banks to use an Expected Credit Loss model for financial asset impairment."
     ),
+    "inflation": (
+        "Inflation often pushes central banks to tighten monetary policy, which can lead to higher "
+        "policy rates and, in turn, higher bank lending and deposit rates. When inflation eases, "
+        "policy rates may stabilize or fall, which can reduce borrowing costs and eventually affect "
+        "deposit returns as well."
+    ),
 }
 
 TECHNOLOGY = {
@@ -117,5 +152,4 @@ def _lookup(query: str, data: dict[str, str], fallback: str) -> str:
         if key in query_lower:
             return value
     return fallback
-
 
